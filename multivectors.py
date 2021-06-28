@@ -1,7 +1,8 @@
 from __future__ import annotations
-import itertools
-from typing import Dict, Iterable, List, MutableMapping, Tuple, Union
 from itertools import combinations
+import math
+from numbers import Real
+from typing import Dict, List, Tuple, Union
 
 NAMES = 'xyzw'
 
@@ -39,406 +40,570 @@ def count_swaps(arr: List[int], copy: bool = True) -> int:
             + count_swaps(right, False)
             + merge(arr, left, right))
 
-class Simple:
-    """An object with a single grade."""
-    bases: List[int]
+def names_to_idxs(name: str) -> List[int]:
+    """Convert swizzled basis vector names into generalized basis indices.
+
+    Examples:
+    - ``names_to_idxs('xyw') == [0, 1, 3]``
+    - ``names_to_idxs('e_1e2_z') == [0, 1, 2]``
+    - ``names_to_idxs('_') == []``
+    """
+    idxs: List[int] = []
+    i = 0
+    nl = len(name)
+    while i < nl:
+        c = name[i]
+        if c in NAMES:
+            idxs.append(NAMES.index(c))
+            i += 1
+        elif c == 'e':
+            i += 1
+            j = i
+            while j < nl and '0' <= name[j] <= '9':
+                j += 1
+            try:
+                idxs.append(int(name[i:j]) - 1)
+            except ValueError:
+                raise TypeError('cannot have empty eN notation') from None
+            i = j
+        else:
+            i += 1
+    return idxs
+
+def idxs_to_idxs(idxs: Index) -> List[int]:
+    """Convert multiple possible ways to specify multiple indices.
+
+    Examples:
+    - ``idxs_to_idxs(slice(None, 5, None)) == [0, 1, 2, 3, 4]``
+    - ``idxs_to_idxs((1, 3, 4)) == [1, 3, 4]``
+    - ``idxs_to_idxs(1) == [1]``
+    """
+    if isinstance(idxs, int):
+        return [idxs]
+    if isinstance(idxs, slice):
+        if idxs.stop is None:
+            raise TypeError('cannot have infinite bases')
+        return list(range(*idxs.indices(idxs.stop)))
+    return idxs
+
+class _BladeGetattr(type):
+    def __getattr__(self, name: str) -> Blade:
+        return Blade(*names_to_idxs(name))
+
+    def __getitem__(self, idxs: Index) -> Blade:
+        return Blade(*idxs_to_idxs(idxs))
+
+class Blade(metaclass=_BladeGetattr):
+    """Zero or more basis vectors multiplied, with a magnitude.
+
+    *bases: 0-indices of individual basis vectors. Blade(0, 1) is the
+        pair of x-hat * y-hat, aka e1 * e2
+    scalar: Real number to scale the blade by.
+
+    With zero bases, represents a scalar. In this capacity, functions
+        pretty much entirely as a float but promotes floats to 0-blades.
+    With one basis, represents a (scaled) basis vector, such as x-hat.
+    With two or more bases, represents a k-blade, such as x-hat*y-hat.
+
+    Basis vector names can be swizzled on the class itself:
+    - ``Blade.xy == Blade(0, 1)``
+    - ``Blade.e1_e3 == Blade(0, 2)``
+    - ``Blade._ == Blade()``
+    And indices can be combined:
+    - ``Blade[1, 3] == Blade(1, 3)``
+    - ``Blade[1:3] == Blade(1, 2)``
+    """
+    bases: Tuple[int, ...]
+    scalar: Real
+
+    _insts = {}
 
     @property
     def grade(self) -> int:
-        """The grade of this blade."""
+        """The k of "k-blade". 1 for basis vectors, 0 for scalars."""
         return len(self.bases)
 
-class Scalar(float, Simple):
-    """A simple with no bases -- a scalar."""
+    def __new__(cls, *bases: int, scalar: Real = 1.0) -> Simple:
+        key = cls.condense_bases(bases, scalar)
+        #if len(key[0]) == 0:
+        #    return key[1]
+        if key not in cls._insts:
+            cls._insts[key] = super().__new__(cls)
+        return cls._insts[key]
 
-    def __new__(cls, x):
-        if x is NotImplemented:
-            return NotImplemented
-        return super().__new__(cls, x)
-
-    @property
-    def bases(self) -> List[int]:
-        return []
-
-    def __add__(self, other: float) -> Scalar:
-        return Scalar(super().__add__(other))
-
-    def __sub__(self, other: float) -> Scalar:
-        return Scalar(super().__sub__(other))
-
-    def __mul__(self, other: float) -> Scalar:
-        return Scalar(super().__mul__(other))
-
-    def __truediv__(self, other: float) -> Scalar:
-        return Scalar(super().__truediv__(other))
-
-    def __floordiv__(self, other: float) -> Scalar:
-        return Scalar(super().__floordiv__(other))
-
-    def __mod__(self, other: float) -> Scalar:
-        return Scalar(super().__mod__(other))
-
-    def __divmod__(self, other: float) -> Scalar:
-        return Scalar(super().__divmod__(other))
-
-    def __pow__(self, other: float) -> Scalar:
-        return Scalar(super().__pow__(other))
-
-class VectorN:
-    """An n-dimensional single-vector."""
-
-    components: List[Scalar]
-    names = 'xyzw'
-
-    @property
-    def dimension(self) -> int:
-        """The number of components in this vector."""
-        return len(self.components)
-
-    def __init__(self, *components: Scalar) -> None:
-        """Construct a vector.
-
-        components: Each component of the vector.
-        """
-        self._components = list(map(Scalar, components))
-
-    @classmethod
-    def from_scalar(cls, scalar: Scalar, dimension: int) -> VectorN:
-        """Construct a vector from a scalar component.
-
-        scalar: The single scalar component.
-        dimension: The number of dimensions of this vector.
-
-        returns: A vector with ``dimension`` components, each ``scalar``.
-        """
-        return cls(*([scalar] * dimension))
-
-    @classmethod
-    def basis(cls, idx: int, dimension: int) -> VectorN:
-        """Construct an n-dimensional basis vector.
-
-        idx: Basis index, e.g. 1 for y-hat.
-        dimension: The number of dimensions of this vector.
-
-        returns: A vector with 1 in the ``idx`` component and zero elsewhere.
-        """
-        return cls(*(int(i == idx) for i in range(dimension)))
-
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Scalar, List[Scalar]]:
-        """Get numbered components."""
-        return self.components[idx]
-
-    def __setitem__(self, idx: Union[int, slice], value):
-        """Set numbered components."""
-        if isinstance(idx, int):
-            try:
-                value = Scalar(value)
-            except (TypeError, ValueError):
-                raise TypeError('must assign numerical value '
-                                'to component') from None
-        self.components[idx] = value
-
-    def __getattr__(self, name: str) -> Union[Scalar, Tuple[Scalar]]:
-        """Get named components."""
-        if not all(c in NAMES for c in name):
-            raise AttributeError
-        try:
-            if len(name) == 1:
-                return self[NAMES.index(name)]
-            return tuple(self[NAMES.index(c)] for c in name)
-        except IndexError:
-            msg = f'this vector only has {self.dimension} components'
-            raise TypeError(msg) from None
-
-    def __setattr__(self, name: str, value) -> None:
-        """Set and swizzle named components."""
-        if not all(c in NAMES for c in name):
-            super().__setattr__(name, value)
-            return
-        if len(name) == 1:
-            try:
-                value = Scalar(value)
-            except (TypeError, ValueError):
-                raise TypeError('must assign numerical value '
-                                'to component') from None
-            try:
-                self[NAMES.index(name)] = value
-            except IndexError:
-                msg = f'this vector only has {self.dimension} components'
-                raise TypeError(msg) from None
-        else:
-            try:
-                values = list(value)
-            except TypeError:
-                raise TypeError('must assign iterable to swizzled components')
-            if len(name) != len(values):
-                raise TypeError('must assign n values to n components')
-            idxs = [NAMES.index(c) for c in name]
-            for i, v in zip(idxs, values):
-                self[i] = v
-
-    def __repr__(self) -> str:
-        return 'Vector2(%s)' % ', '.join(map(repr, self.components))
-
-    __str__ = __repr__
-
-    def __eq__(self, other) -> bool:
-        if isinstance(other, VectorN):
-            return self.components == other.components
-        # if this is a zero vector, it is equal to any other zero
-        return abs(other) == 0 == abs(self)
-
-    # binary operators
-
-    def __add__(self, other: SV) -> SV:
-        """u.__add__(v) <=> u + v"""
-        if not isinstance(other, _SV):
-            return NotImplemented
-        if abs(self) == 0:
-            return other
-        if not isinstance(other, VectorN):
-            return MultiVector(self, other)
-        if self.dimension != other.dimension:
-            raise TypeError('cannot add vectors with different dimensions')
-        return VectorN(*(a + b for a, b in zip(
-            self.components, other.components)))
-
-    def __sub__(self, other: SV) -> SV:
-        """u.__sub__(v) <=> u - v"""
-        return self + (-other)
-
-    def __mul__(self, other: Union[float, VectorN]) \
-            -> Union[VectorN, Blade, MultiVector]:
-        """u.__mul__(v) <=> u * v <=> uv"""
-        if isinstance(other, float):
-            return VectorN(*(i * other for i in self.components))
-        if isinstance(other, VectorN):
-            return (MultiVector.from_vector(self)
-                    * MultiVector.from_vector(other))
-        return NotImplemented
-
-    def __truediv__(self, other: Union[float, VectorN]) -> VectorN:
-        """u.__truediv__(v) <=> u / v <=> u * ~v (for vector v)"""
-        if isinstance(other, float):
-            return self * (1/other)
-        if isinstance(other, VectorN):
-            return self * ~other
-        return NotImplemented
-
-    def __rtruediv__(self, other: float) -> VectorN:
-        """u.__rtruediv__(v) <=> v / u <=> v * ~u (for scalar v)"""
-        if isinstance(other, float):
-            return (~self) * other
-        return NotImplemented
-
-    def __matmul__(self, other: VectorN) -> VectorN:
-        """u.__matmul__(v) <=> u @ v (dot product)"""
-        if not isinstance(other, VectorN):
-            return NotImplemented
-        if self.dimension != other.dimension:
-            raise TypeError(
-                'cannot multiply vectors with different dimensions')
-        return (self * other + other * self) * 0.5
-
-    def __xor__(self, other: VectorN) -> Union[Blade, MultiVector]:
-        """u.__xor__(v) <=> u ^ v (outer product)"""
-        if not isinstance(other, VectorN):
-            return NotImplemented
-        return (self * other - other * self) * 0.5
-
-    # unary operators
-
-    def __neg__(self) -> VectorN:
-        """u.__neg__() <=> -u"""
-        return VectorN(*(-i for i in self.components))
-
-    def __pos__(self) -> VectorN:
-        """u.__pos__() <=> +u <=> u normalized"""
-        return self / abs(self)
-
-    def __abs__(self) -> Scalar:
-        """u.__abs__() <=> abs(u) <=> sqrt(u @ u)"""
-        return (self @ self) ** .5
-
-    def __invert__(self) -> VectorN:
-        """u.__invert__() <=> ~u <=> 1/u"""
-        return self / (self @ self)
-
-class Blade(Simple):
-    """u * v = Blade.from_2_vectors(u, v)"""
-    bases: List[int]
-    scalar: Scalar
-    dimension: int
-
-    def __new__(cls, *bases: int, dimension: int, scalar: Scalar = 1.0) -> Simple:
-        bases, scalar = cls.condense_bases(bases)
-        if len(bases) == 0:
-            return scalar
-        return super().__new__(cls)
-
-    def __init__(self, *bases: int, dimension: int, scalar: Scalar = 1.0) -> None:
-        self.dimension = int(dimension)
+    def __init__(self, *bases: int, scalar: Real = 1.0) -> None:
         self.bases, self.scalar = self.condense_bases(bases, scalar)
 
+    @classmethod
+    def check(cls, obj: Simple) -> Blade:
+        """Check if an object is a primitive real number.
+        If so, promote it to a 0-blade.
+        Otherwise, just return the object.
+        """
+        if isinstance(obj, Real):
+            return cls(scalar=obj)
+        return obj
+
     @staticmethod
-    def condense_bases(bases: Tuple[int], scalar: Scalar = 1.0) \
-            -> Tuple[List[int], Scalar]:
+    def condense_bases(bases: Tuple[int, ...], scalar: Real = 1.0) \
+            -> Tuple[Tuple[int, ...], Real]:
+        """Normalize a sequence of bases, modifying the scalar as necessary.
+
+        bases: The tuple of basis indices.
+        scalar: Real number that will scale the resulting blade.
+
+        Returns: a 2-tuple of normalized bases and the modified scalar.
+
+        Examples:
+        - ``condense_bases((1, 1, 2, 1, 2), 2.0) == ((1,), -2.0)``
+        - ``condense_bases((1, 2, 1, 2), 1.5) == ((), -1.5)``
+        - ``condense_bases((2, 1, 3, 2, 3, 3), 1.0) == ((1, 3), 1.0)``
+        """
         bases = list(bases)
-        scalar = Scalar(scalar)
         if count_swaps(bases) % 2 == 1:
             scalar *= -1
         bases.sort()
-        bases = sum(([basis] * (bases.count(basis) % 2)
-                     for basis in set(bases)), [])
-        return bases, scalar
-
-    @classmethod
-    def from_2_vectors(cls, u: VectorN, v: VectorN, scalar: Scalar = 1.0) \
-            -> Union[Blade, MultiVector]:
-        if u.dimension != v.dimension:
-            raise TypeError('cannot take outer product of '
-                            'vectors with different dimension')
-        pairs = []
-        for i, j in combinations(range(u.dimension), 2):
-            pairs.append(cls(i, j,
-                             scalar=u[i] * v[j] - u[j] * v[i],
-                             dimension=u.dimension))
-        return MultiVector(*pairs) * scalar
+        bases = [basis for basis in set(bases)
+                 for _ in range(bases.count(basis) % 2)]
+        return tuple(bases), scalar
 
     def __repr__(self) -> str:
-        if max(self.bases) > 3: # 0 = x, 3 = w
-            bases = ' * '.join(f'e{i}' for i in self.bases)
+        """Return the representation of this blade.
+
+        If Blade is in the global namespace, this produces
+        eval()-able code that gets the original object back.
+        """
+        if not self.bases:
+            return repr(self.scalar)
+        if max(self.bases) > 3: # i=3 => e4 = w
+            r = 'Blade(%s)' % ', '.join(map(repr, self.bases))
         else:
-            bases = ' * '.join(NAMES[i] for i in self.bases)
-        return f'({self.scalar} * {bases})'
+            r = 'Blade.' + ''.join(NAMES[i] for i in self.bases)
+        return '%r * %s' % (self.scalar, r)
 
-    __str__ = __repr__
+    def __str__(self) -> str:
+        """Return the pretty representation of this blade.
 
-    def __add__(self, other: SV) -> Union[Blade, MultiVector]:
-        if isinstance(other, Blade):
-            if self.dimension != other.dimension:
-                raise TypeError(
-                    'cannot combine blades of different dimensions')
-            if self.bases == other.bases:
-                return Blade(*self.bases, dimension=self.dimension,
-                             scalar=self.scalar + other.scalar)
-        return MultiVector(self, other)
+        This prefers basis names over eval()-ability.
+        """
+        if not self.bases:
+            return str(self.scalar)
+        if max(self.bases) > 3:
+            r = ''.join(f'e{i}' for i in self.bases)
+        else:
+            r = ''.join(NAMES[i] for i in self.bases)
+        return '%s%s' % (self.scalar, r)
 
-    def __sub__(self, other: SV) -> Union[Blade, MultiVector]:
+    # Binary operators
+
+    def __add__(self, other: MVV) -> MV:
+        """Add a blade and another object.
+
+        Returns: 0-blade if this blade has grade 0 and the object is scalar.
+        Returns: k-blade with scalars summed if the object is a k-blade.
+        Returns: MultiVector summing this object and the other otherwise.
+        """
+        if isinstance(other, Real) and self.bases == ():
+            return Blade(scalar=self.scalar + other)
+        if isinstance(other, Blade) and self.bases == other.bases:
+            return Blade(*self.bases, scalar=self.scalar + other.scalar)
+        if isinstance(other, _MVV):
+            return MultiVector.from_terms(self, other)
+        return NotImplemented
+
+    def __radd__(self, other: Real) -> Blade:
+        """Support adding blades on the right side of scalars."""
+        if isinstance(other, Real):
+            return self + other # scalar addition is commutative
+        return NotImplemented
+
+    def __sub__(self, other: MVV) -> MV:
+        """Subtracting is adding the negation."""
         return self + (-other)
 
-    def __mul__(self, other: Union[VectorN, Simple]) -> Union[Blade, MultiVector]:
-        if isinstance(other, float):
-            return Blade(*self.bases, dimension=self.dimension,
-                         scalar=self.scalar * other)
-        if self.dimension != other.dimension:
-            raise TypeError('cannot combine blades of different dimensions')
+    def __rsub__(self, other: Real) -> Blade:
+        """Support subtracting blades from scalars."""
+        return other + (-self)
+
+    def __mul__(self, other: Simple) -> Blade:
+        """Multiply a blade and another object.
+
+        Returns: k-blade scaled by object if object is scalar.
+        Returns: The geometric product, if both objects are blades.
+        """
+        if isinstance(other, Real):
+            return Blade(*self.bases, scalar=self.scalar * other)
         if isinstance(other, Blade):
             return Blade(*self.bases, *other.bases,
-                         dimension=self.dimension,
                          scalar=self.scalar * other.scalar)
-        if isinstance(other, VectorN):
-            return self * MultiVector.from_vector(other)
         return NotImplemented
 
-    def __rmul__(self, other: Union[VectorN, Scalar]) -> Union[Blade, MultiVector]:
-        if isinstance(other, float):
-            return self * other
-        if isinstance(other, VectorN):
-            return MultiVector.from_vector(other) * self
+    def __rmul__(self, other: Real) -> Blade:
+        """Support multiplying blades on the right side of scalars."""
+        if isinstance(other, Real):
+            return self * other # scalar multiplication is commutative
         return NotImplemented
 
-    def __matmul__(self, other: SV) -> Union[Blade, MultiVector]:
-        """u.__matmul__(v) <=> u @ v (inner product)"""
-        return (self * other + other * self) * 0.5
+    def __matmul__(self, other: Simple) -> Simple:
+        """Get the inner (dot) product of two objects.
 
-    def __xor__(self, other: SV) -> Union[Blade, MultiVector]:
-        """u.__xor__(v) <=> u ^ v (outer product)"""
-        return (self * other - other * self) * 0.5
+        Returns: The scaled blade when dotting with a scalar.
+        Returns: The inner product of the two blades, which can be scalar 0.
+        """
+        return (self * other) % abs(self.grade - Blade.check(other).grade)
+
+    dot = inner = __matmul__
+
+    def __truediv__(self, other: Simple) -> Blade:
+        """Divide two objects.
+
+        Returns: The scaled blade when dividing by a scalar.
+        Returns: The geometric product of this blade and the other's inverse.
+        """
+        if isinstance(other, Real):
+            return self * (1 / other)
+        if isinstance(other, Blade):
+            return self * other / (abs(other) * abs(other))
+        return NotImplemented
+
+    def __rtruediv__(self, other: Real) -> Blade:
+        """Divide a scalar by a blade."""
+        return other * self / (abs(self) * abs(self))
+
+    def __mod__(self, other: int) -> Simple:
+        """The choose operator - returns the sum of all blades of grade k.
+        When applied to a blade, returns the blade if k is the blade's grade.
+        Returns scalar 0 otherwise.
+        """
+        return self if self.grade == other else 0.0
+
+    choose = __mod__
+
+    def __pow__(self, other: int, modulo: int = None) -> Simple:
+        """A blade raised to an integer power.
+        A ** n = A * A * A * ... * A n times.
+        The optional ternary power uses the choose operator afterwards.
+        """
+        if not isinstance(other, int):
+            if not self.bases:
+                return float(self) ** other
+            return NotImplemented
+        result = 1
+        for _ in range(other):
+            result *= self
+        if modulo is not None:
+            if not isinstance(modulo, int):
+                return NotImplemented
+            return result % modulo
+        return result
+
+    def __rpow__(self, other: Real) -> Simple:
+        """A real number raised to a blade power.
+        x ** A = e ** (A ln x) = e ** (I * a ln x)
+        = cos(a ln x) + sin(a ln x) * I
+        """
+        if not isinstance(other, Real):
+            return NotImplemented
+        # Assume this vector is i
+        theta = self.scalar * math.log(other)
+        return math.cos(theta) + Blade(*self.bases, scalar=math.sin(theta))
+
+    def __xor__(self, other: Simple) -> Simple:
+        """Get the outer (wedge) product of two objects.
+        WARNING: Operator precedence puts ^ after +!
+        Make sure to put outer products in parentheses, like this:
+        ``u * v == u @ v + (u ^ v)``
+
+        Returns: The scaled blade when wedging with a scalar.
+        Returns: The outer product of the two blades, which can be scalar 0.
+        """
+        return (self * other) % (self.grade + other.grade)
+
+    wedge = outer = __xor__
+
+    # Unary operators
 
     def __neg__(self) -> Blade:
+        """The negation of a blade is the blade with its scalar negated."""
         return self * -1
 
-    def __abs__(self) -> Scalar:
-        return self.scalar
+    def __abs__(self) -> Real:
+        """Get the scalar of a blade."""
+        return float(self.scalar)
+
+    magnitude = __abs__
+
+    def __invert__(self) -> Blade:
+        """A normalized blade is one with a magnitude of 1."""
+        return Blade(*self.bases)
+
+    normalize = __invert__
+
+    def __float__(self) -> float:
+        """Convert the scalar of a blade to a float."""
+        if self.bases == ():
+            return float(self.scalar)
+        return NotImplemented
 
 class MultiVector:
-    """Anything not simple is a multivector."""
-    terms: List[Simple]
+    """Two or more incompatible blades, summed together.
 
-    def __new__(cls, *terms: SV) -> SV:
-        terms2 = cls.condense_terms(terms)
-        if len(terms2) == 1:
-            return terms2[0]
-        return super().__new__(cls)
+    The bare constructor is not meant for regular use.
+    Use the factory ``MultiVector.from_terms()`` instead.
 
-    def __init__(self, *terms: SV) -> None:
-        self.terms = self.condense_terms(terms)
+    Basis vector names can be swizzled on instances:
+    - ``(x + y).x == 1.0``
+    - ``(x * y + z).xy == 1.0``
+    - ``(x + y).e3 == 0.0``
+    And indices can be combined:
+    - ``(x + y)[0] == 1.0``
+    - ``(x * y + z)[0, 1] == 1.0``
+    - ``(x + y)[2] == 0.0``
+    """
 
-    @staticmethod
-    def condense_terms(terms: Tuple[SV]) -> Tuple[SV]:
-        _terms: List[Simple] = []
-        for term in terms:
-            if abs(term) == 0:
-                continue
-            if isinstance(term, VectorN):
-                term = MultiVector.from_vector(term)
-            if isinstance(term, MultiVector):
-                _terms.extend(term.terms)
-            else:
-                _terms.append(term)
-        termdict: Dict[int, Dict[Tuple[int], List[Simple]]] = {}
-        for term in _terms:
-            termdict.setdefault(term.grade, {}).setdefault(
-                tuple(term.bases), []).append(term)
-        termdict2: Dict[int, Dict[Tuple[int], Simple]] = {}
-        for grade, value in termdict.items():
-            termdict2.setdefault(grade, {})
-            for bases, value2 in value.items():
-                termdict2[grade][bases] = sum(value2)
-        terms2 = [value2 for value in termdict2.values()
-                  for value2 in value.values() if abs(value2) != 0]
-        terms2.sort(key=lambda t: (t.grade, t.bases))
-        return tuple(terms2)
+    termdict: Dict[Tuple[int, ...], Real]
+
+    @property
+    def terms(self) -> Tuple[Blade, ...]:
+        """Get a sequence of blades comprising this multivector."""
+        keys = sorted(self.termdict.keys(), key=lambda b: (len(b), b))
+        return tuple(Blade(*key, scalar=self.termdict[key]) for key in keys)
+
+    def __init__(self, termdict: Dict[Tuple[int, ...], Real]):
+        self.termdict = termdict.copy()
 
     @classmethod
-    def from_vector(self, v: VectorN) -> MultiVector:
-        """Convert a vector into a sum of basis 1-blades"""
-        return sum(Blade(i, dimension=v.dimension, scalar=j)
-                   for i, j in enumerate(v.components))
+    def from_terms(cls, *terms: MV) -> MV:
+        """Create a multivector from a sequence of terms.
+        This may return something other than a MultiVector
+        if it is the only term or there are no terms.
+        """
+        terms: List[Simple] = [
+            t for term in terms for t in
+            (term.terms if isinstance(term, MultiVector) else (term,))
+        ]
+        termdict: Dict[Tuple[int, ...], List[Real]] = {}
+        for t in terms:
+            if abs(t) == 0:
+                continue
+            if isinstance(t, Real):
+                t = Blade(scalar=t)
+            termdict.setdefault(t.bases, []).append(t.scalar)
+        d = {b: math.fsum(s) for b, s in termdict.items()}
+        for key in [k for k in d if d[k] == 0]:
+            del d[key]
+        inst = cls(d)
+        ts = list(inst.terms)
+        if not ts:
+            return 0.0
+        if len(ts) == 1:
+            return ts[0]
+        return inst
+
+    def __getattr__(self, name: str) -> Union[Real, Tuple[Real, ...]]:
+        """Support basis name swizzling."""
+        idxs = tuple(names_to_idxs(name))
+        return self[idxs]
+
+    def __getitem__(self, idxs: Index) -> Union[Real, Tuple[Real]]:
+        """Support index swizzling."""
+        idxs = tuple(idxs_to_idxs(idxs))
+        return self.termdict.get(idxs, 0.0)
 
     def __repr__(self) -> str:
+        """Return a representation of this multivector.
+        Depending on the global namespace, this may be eval()-able.
+        """
         return '(' + ' + '.join(map(repr, self.terms)) + ')'
 
-    def __add__(self, other: SV) -> MultiVector:
+    def __str__(self) -> str:
+        """Return a representation of this multivector suited for showing."""
+        return '(' + ' + '.join(map(str, self.terms)) + ')'
+
+    # Binary operators
+
+    def __add__(self, other: MVV) -> MV:
+        """Add a multivector and another object.
+
+        Returns: The sum of the terms of this multivector and the other.
+        Returns: The other object added to this multivector's terms.
+        """
         if isinstance(other, MultiVector):
-            return MultiVector(*self.terms, *other.terms)
-        if isinstance(other, Simple):
-            return MultiVector(*self.terms, other)
-        if isinstance(other, VectorN):
-            return self + MultiVector.from_vector(other)
+            return self.from_terms(*self.terms, *other.terms)
+        if isinstance(other, _Simple):
+            return self.from_terms(*self.terms, other)
         return NotImplemented
 
-    def __sub__(self, other: SV) -> MultiVector:
+    def __radd__(self, other: MVV) -> MV:
+        """Support adding multivectors on the right side of objects."""
+        if isinstance(other, MultiVector):
+            return self.from_terms(*other.terms, *self.terms)
+        if isinstance(other, _Simple):
+            return self.from_terms(other, *self.terms)
+        return NotImplemented
+
+    def __sub__(self, other: MVV) -> MV:
+        """Subtracting is adding the negation."""
         return self + (-other)
 
-    def __mul__(self, other: SV) -> MultiVector:
+    def __rsub__(self, other: MVV) -> MV:
+        """Support subtracting multivectors from objects."""
+        return other + (-self)
+
+    def __mul__(self, other: MVV) -> MV:
+        """Multiply a multivector and another object.
+
+        Returns: (a+b)*(c+d)=a*c+a*d+b*c+b*d for multivectors (a+b) and (c+d)
+        Returns: (a+b)*v = a*v + b*v for multivector (a+b) and simple v
+        """
         if isinstance(other, MultiVector):
-            return MultiVector(*(
-                a * b for a in self.terms for b in other.terms))
-        if isinstance(other, Simple):
-            return MultiVector(*(
-                t * other for t in self.terms))
-        if isinstance(other, VectorN):
-            return self * MultiVector.from_vector(other)
+            return self.from_terms(*(a * b for b in other.terms
+                                     for a in self.terms))
+        if isinstance(other, _Simple):
+            return self.from_terms(*(t * other for t in self.terms))
         return NotImplemented
 
+    def __rmul__(self, other: Simple) -> MV:
+        """Support multiplying multivectors on the right side of simples."""
+        if isinstance(other, _Simple):
+            return self.from_terms(*(other * t for t in self.terms))
+        return NotImplemented
+
+    def __matmul__(self, other: MVV) -> MV:
+        """Get the inner (dot) product of two objects.
+
+        Returns: (a+b)@(c+d)=a@c+a@d+b@c+b@d for multivectors (a+b) and (c+d)
+        Returns: (a+b)@v = a@v + b@v for multivector (a+b) and simple v
+        """
+        if isinstance(other, MultiVector):
+            return self.from_terms(*(
+                Blade.check(a) @ Blade.check(b)
+                for b in other.terms for a in self.terms))
+        if isinstance(other, _Simple):
+            return self.from_terms(*(
+                Blade.check(t) @ Blade.check(other)
+                for t in self.terms))
+        return NotImplemented
+
+    dot = inner = __matmul__
+
+    def __truediv__(self, other: Simple) -> MV:
+        """Divide two objects.
+
+        Returns: (a+b)/v = a/v + b/v for multivector (a+b) and simple v
+        """
+        if isinstance(other, _Simple):
+            return self.from_terms(*(t / other for t in self.terms))
+        return NotImplemented
+
+    def __mod__(self, grade: int) -> MVV:
+        """The choose operator - returns the sum of all blades of grade k.
+
+        Examples:
+        - (a+bx+cy+dxy) % 1 = bx+cy
+        - (a+b+cx+dxy+exy) % 2 = dxy+exy
+        - (a+b+cx+dxy+exy) % 0 = a+b
+        """
+        if not isinstance(grade, int):
+            return NotImplemented
+        bs = set(basis for bases in self.termdict.keys() for basis in bases)
+        return sum(self[bases] for bases in combinations(bs, grade))
+
+    choose = __mod__
+
+    def __pow__(self, other: int, modulo: int = None) -> MVV:
+        """A multivector raised to an integer power.
+        V ** n = V * V * V * ... * V n times.
+        The optional ternary power uses the choose operator afterwards.
+        """
+        if not isinstance(other, int):
+            return NotImplemented
+        result = 1
+        for _ in range(other):
+            result *= self
+        if modulo is not None:
+            if not isinstance(modulo, int):
+                return NotImplemented
+            return result % modulo
+        return result
+
+    def __rpow__(self, other: Real) -> MVV:
+        """A real number raised to a multivector power.
+        x ** V = Product of x ** Vi = Product of e ** (Vi ln x)
+        = Product of (cos(ai ln x) + sin(ai ln x) * Ii)
+        """
+        if not isinstance(other, Real):
+            return NotImplemented
+        result = 1
+        for t in self.terms:
+            result *= other ** t
+        return result
+
+    def __xor__(self, other: MVV) -> MV:
+        """Get the outer (wedge) product of two objects.
+        WARNING: Operator precedence puts ^ after +!
+        Make sure to put outer products in parentheses, like this:
+        ``u * v == u @ v + (u ^ v)``
+
+        Returns: (a+b)^(c+d)=(a^c)+(a^d)+(b^c)+(b^d) for (a+b), (c+d)
+        Returns: (a+b)^v = (a^v) + (b^v) for multivector (a+b) and simple v
+        """
+        if isinstance(other, MultiVector):
+            return self.from_terms(*(
+                Blade.check(a) ^ Blade.check(b)
+                for b in other.terms for a in self.terms))
+        if isinstance(other, _Simple):
+            return self.from_terms(*(
+                Blade.check(t) ^ Blade.check(other)
+                for t in self.terms))
+        return NotImplemented
+
+    wedge = outer = __xor__
+
+    # Unary operators
+
     def __neg__(self) -> MultiVector:
-        return self * -1
+        """The negation of a multivector is the negation of all its terms."""
+        return self.from_terms(*(-t for t in self.terms))
 
-    def __abs__(self) -> Scalar:
-        return (self * self) ** .5
+    def __abs__(self) -> Real:
+        """The magnitude of a multivector is the square root of
+        the sum of the squares of its terms.
+        """
+        return math.fsum(t * t for t in self.terms) ** .5
 
-# any number, with or without orientation
-_SV = Simple, VectorN, MultiVector
-SV = Union[Simple, VectorN, MultiVector]
+    magnitude = __abs__
+
+    def __invert__(self) -> MultiVector:
+        """A normalized multivector is one scaled down by its magnitude."""
+        return self / abs(self)
+
+    normalize = __invert__
+
+    # Actual methods
+
+    def rotate(self, angle: Real, plane: Blade) -> MultiVector:
+        """Rotate this multivector by angle in rads around the blade plane.
+
+        angle: Angle to rotate by, in radians.
+        plane: Blade representing basis plane to rotate through.
+        """
+        power = plane * angle / 2
+        return (math.e ** (-power)) * self * (math.e ** power)
+
+    def angle_to(self, other: MultiVector) -> MultiVector:
+        """Get the angle between this multivector and another."""
+        return math.acos((self @ other) / (abs(self) * abs(other)))
+
+_ = Blade._
+x = Blade.x
+y = Blade.y
+z = Blade.z
+w = Blade.w
+
+Simple = Union[Real, Blade]
+_Simple = Real, Blade
+MV = Union[Blade, MultiVector]
+MVV = Union[Real, Blade, MultiVector]
+_MVV = Real, Blade, MultiVector
+Index = Union[int, Tuple[int, ...], slice]
