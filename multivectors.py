@@ -179,7 +179,7 @@ class Blade(metaclass=_BladeGetattr):
             r = 'Blade(%s)' % ', '.join(map(repr, self.bases))
         else:
             r = 'Blade.' + ''.join(NAMES[i] for i in self.bases)
-        return '%r * %s' % (self.scalar, r)
+        return '%.2f * %s' % (self.scalar, r)
 
     def __str__(self) -> str:
         """Return the pretty representation of this blade.
@@ -192,7 +192,7 @@ class Blade(metaclass=_BladeGetattr):
             r = ''.join(f'e{i}' for i in self.bases)
         else:
             r = ''.join(NAMES[i] for i in self.bases)
-        return '%s%s' % (self.scalar, r)
+        return '%.2f%s' % (self.scalar, r)
 
     # Binary operators
 
