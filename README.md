@@ -16,4 +16,4 @@ pip install multivectors
 
 ```
 
-For more see [the docs](https://github.com/Kenny2github/MultiVectors/wiki)
+For more see [the docs](https://github.com/Kenny2github/MultiVectors/blob/main/docs.md)

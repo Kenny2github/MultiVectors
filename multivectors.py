@@ -17,7 +17,7 @@ pip install multivectors
 
 ```
 
-For more see [the docs](https://github.com/Kenny2github/MultiVectors/wiki)
+For more see [the docs](https://github.com/Kenny2github/MultiVectors/blob/main/docs.md)
 """
 from __future__ import annotations
 from itertools import combinations
@@ -348,11 +348,8 @@ class Blade(metaclass=_BladeGetattr):
 
         ```
         """
-        if isinstance(other, Real):
-            if self.bases != ():
-                return False
-            return self.scalar == other
-        if isinstance(other, Blade):
+        if isinstance(other, _Simple):
+            other = Blade.check(other)
             return (self.bases, self.scalar) == (other.bases, other.scalar)
         return False
 
