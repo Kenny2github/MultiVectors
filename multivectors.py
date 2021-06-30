@@ -177,7 +177,7 @@ class Blade(metaclass=_BladeGetattr):
     >>> Blade.xy == Blade(0, 1)
     True
     >>> Blade.e1_e3 == Blade(0, 2)
-    True
+    False
     >>> Blade._ == Blade()
     True
 
