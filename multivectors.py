@@ -8,17 +8,15 @@ pip install multivectors
 ```
 
 ## Usage
-```py
-import math
-from multivectors import x, y, z
-
-v = 2*x + 3*y + 4*z
-print(v.rotate(math.pi/2, x * y))
-```
-Output:
-```
+```python
+>>> import math
+>>> from multivectors import x, y, z
+>>> v = 2*x + 3*y + 4*z
+>>> print(v.rotate(math.pi/2, x * y))
 (-3.00x + 2.00y + 4.00z)
 ```
+
+For more see [the docs](https://github.com/Kenny2github/MultiVectors/wiki)
 """
 from __future__ import annotations
 from itertools import combinations
@@ -36,7 +34,7 @@ __all__ = [
     'w'
 ]
 
-__version__ = '0.0.0'
+__version__ = '0.1.0'
 
 NAMES = 'xyzw'
 
