@@ -14,6 +14,7 @@ pip install multivectors
 >>> v = 2*x + 3*y + 4*z
 >>> print(v.rotate(math.pi/2, x * y))
 (-3.00x + 2.00y + 4.00z)
+
 ```
 
 For more see [the docs](https://github.com/Kenny2github/MultiVectors/wiki)
@@ -34,7 +35,7 @@ __all__ = [
     'w'
 ]
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 
 NAMES = 'xyzw'
 
@@ -328,6 +329,129 @@ class Blade(metaclass=_BladeGetattr):
             r = ''.join(NAMES[i] for i in self.bases)
         return '%.2f%s' % (self.scalar, r)
 
+    # Relational operators
+
+    def __eq__(self, other: Simple) -> bool:
+        """Compare equality of two objects.
+
+        Returns: True if this is a scalar blade equal to the real.
+        Returns: True if this blade's bases and scalar equal the other's.
+        Returns: False for all other cases or types.
+
+        ```python
+        >>> Blade._ * 1 == 1
+        True
+        >>> Blade.xy == Blade.xy
+        True
+        >>> Blade.xy == Blade.x + Blade.y
+        False
+
+        ```
+        """
+        if isinstance(other, Real):
+            if self.bases != ():
+                return False
+            return self.scalar == other
+        if isinstance(other, Blade):
+            return (self.bases, self.scalar) == (other.bases, other.scalar)
+        return False
+
+    def __ne__(self, other: Simple) -> bool:
+        """Compare inequality of two objects.
+
+        Returns: False if this is a scalar blade equal to the real.
+        Returns: False if this blade's bases and scalar equal the other's.
+        Returns: True for all other cases or types.
+
+        ```python
+        >>> Blade._ * 1 != 2
+        True
+        >>> Blade.xy * 1 != Blade.xy * 2
+        True
+        >>> Blade.xy != Blade.x + Blade.y
+        True
+
+        ```
+        """
+        return not (self == other)
+
+    def __lt__(self, other: Real) -> bool:
+        """Compare this blade less than an object.
+
+        Returns: True if this is a scalar blade less than the real.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> Blade._ * 1 < 2
+        True
+        >>> Blade.x * 1 < 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '<' not supported between instances of 'Blade' and 'int'
+
+        ```
+        """
+        if not (isinstance(other, Real) and self.bases == ()):
+            return NotImplemented
+        return self.scalar < other
+
+    def __gt__(self, other: Real) -> bool:
+        """Compare this blade greater than an object.
+
+        Returns: True if this is a scalar blade greater than the real.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> Blade._ * 2 > 1
+        True
+        >>> Blade.x * 2 > 1
+        Traceback (most recent call last):
+            ...
+        TypeError: '>' not supported between instances of 'Blade' and 'int'
+
+        """
+        if not (isinstance(other, Real) and self.bases == ()):
+            return NotImplemented
+        return self != other and not (self < other)
+
+    def __le__(self, other: Real) -> bool:
+        """Compare this blade less than or equal to an object.
+
+        Returns: True if this is a scalar blade not greater than the real.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> Blade._ * 1 <= 2
+        True
+        >>> Blade.x * 1 <= 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '<=' not supported between instances of 'Blade' and 'int'
+
+        """
+        if not (isinstance(other, Real) and self.bases == ()):
+            return NotImplemented
+        return self < other or self == other
+
+    def __ge__(self, other: Real) -> bool:
+        """Compare this blade greater than or equal to an object.
+
+        Returns: True if this is a scalar blade not less than the real.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> Blade._ * 2 >= 1
+        True
+        >>> Blade.x * 2 >= 1
+        Traceback (most recent call last):
+            ...
+        TypeError: '>=' not supported between instances of 'Blade' and 'int'
+
+        """
+        if not (isinstance(other, Real) and self.bases == ()):
+            return NotImplemented
+        return not (self < other)
+
     # Binary operators
 
     def __add__(self, other: MVV) -> MV:
@@ -571,12 +695,11 @@ class Blade(metaclass=_BladeGetattr):
         = cos(a ln x) + sin(a ln x) * I
 
         ```python
-        >>> from math import e, pi
-        >>> from cmath import isclose
+        >>> from cmath import e, pi, isclose
         >>> round(e ** (pi / 4 * Blade.xy), 2)
         (0.71 + 0.71 * Blade.xy)
         >>> # in 2D, xy is isomorphic to i
-        >>> isclose(e ** (pi * Blade.xy), -1)
+        >>> round(e ** (pi * Blade.xy), 9) == -1
         True
         >>> isclose(e ** (pi * 1j), -1)
         True
@@ -924,6 +1047,42 @@ class MultiVector:
         ```
         """
         return '(' + ' + '.join(map(str, self.terms)) + ')'
+
+    # Relational operators
+
+    def __eq__(self, other: MultiVector) -> bool:
+        """Compare equality of two objects.
+
+        Returns: True if all terms of this multivector are equal to the other.
+        Returns: False for all other cases or types.
+
+        ```python
+        >>> Blade.x + Blade.y == Blade.y + Blade.x
+        True
+        >>> Blade.x + 2 * Blade.y == 2 * Blade.x + Blade.y
+        False
+
+        ```
+        """
+        if not isinstance(other, MultiVector):
+            return False
+        return self.termdict == other.termdict
+
+    def __ne__(self, other: MultiVector) -> bool:
+        """Compare inequality of two objects.
+
+        Returns: False if all terms of this multivector are equal to the other.
+        Returns: True for all other cases or types.
+
+        ```python
+        >>> Blade.x + Blade.y != Blade.y + Blade.x
+        False
+        >>> Blade.x + 2 * Blade.y != 2 * Blade.x + Blade.y
+        True
+
+        ```
+        """
+        return not (self == other)
 
     # Binary operators
 
@@ -1361,7 +1520,3 @@ def __getattr__(name: str) -> Blade:
     Unlike Blade.__getattr__, this rejects invalid characters in the name.
     """
     return Blade(*names_to_idxs(name, True))
-
-if __name__ == "__main__":
-    import doctest
-    doctest.testmod()
