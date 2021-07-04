@@ -34,7 +34,7 @@ __all__ = [
     'w'
 ]
 
-__version__ = '0.1.1'
+__version__ = '1.0.0'
 
 NAMES = 'xyzw'
 
@@ -1114,3 +1114,9 @@ def set_scalar_factory(
     Scalar_f = factory
     Scalar_t = instancecheck
     _blades.clear()
+
+_: MultiVector
+x: MultiVector
+y: MultiVector
+z: MultiVector
+w: MultiVector
