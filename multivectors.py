@@ -20,10 +20,9 @@ pip install multivectors
 For more see [the docs](https://github.com/Kenny2github/MultiVectors/blob/main/docs.md)
 """
 from __future__ import annotations
-from itertools import combinations
 import math
 from numbers import Real
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Iterable, List, Tuple, Type, Union
 
 __all__ = [
     'Blade',
@@ -153,1219 +152,695 @@ def idxs_to_idxs(idxs: Index) -> List[int]:
         return list(range(*idxs.indices(idxs.stop)))
     return list(idxs)
 
-class _BladeGetattr(type):
-    def __getattr__(self, name: str) -> Blade:
-        return Blade(*names_to_idxs(name))
+def idxs_to_names(idxs: Index, sep='') -> str:
+    """Convert indices to a swizzled name combination.
 
-    def __getitem__(self, idxs: Index) -> Blade:
-        return Blade(*idxs_to_idxs(idxs))
-
-class Blade(metaclass=_BladeGetattr):
-    """Zero or more basis vectors multiplied, with a magnitude.
-
-    *bases: 0-indices of individual basis vectors. Blade(0, 1) is the
-        pair of x-hat * y-hat, aka e1 * e2
-    scalar: Real number to scale the blade by.
-
-    With zero bases, represents a scalar. In this capacity, functions
-        pretty much entirely as a float but promotes floats to 0-blades.
-    With one basis, represents a (scaled) basis vector, such as x-hat.
-    With two or more bases, represents a k-blade, such as x-hat*y-hat.
-
-    Basis vector names can be swizzled on the class itself:
+    Examples:
     ```python
-    >>> Blade.xy == Blade(0, 1)
-    True
-    >>> Blade.e1_e3 == Blade(0, 2)
-    True
-    >>> Blade._ == Blade()
-    True
-
-    ```
-    And indices can be combined:
-    ```python
-    >>> Blade[1, 3] == Blade(1, 3)
-    True
-    >>> Blade[1:3] == Blade(1, 2)
-    True
+    >>> idxs_to_names(slice(None, 5, None))
+    'e1e2e3e4e5'
+    >>> idxs_to_names((0, 1, 3))
+    'xyw'
+    >>> idxs_to_names(2)
+    'z'
 
     ```
     """
-    bases: Tuple[int, ...]
-    scalar: Real
-
-    _insts = {}
-
-    @property
-    def grade(self) -> int:
-        """The k of "k-blade".
-
-        ```python
-        >>> (3 * Blade._).grade # scalars
-        0
-        >>> (2 * Blade.x).grade # vectors
-        1
-        >>> (4 * Blade.yz).grade # bivectors
-        2
-
-        ```
-        """
-        return len(self.bases)
-
-    @property
-    def terms(self) -> Tuple[Blade]:
-        """For compatibility with MultiVector.
-
-        ```python
-        >>> Blade.x.terms
-        (1.0 * Blade.x,)
-
-        ```
-        """
-        return (self,)
-
-    def __new__(cls, *bases: int, scalar: Real = 1.0) -> Simple:
-        key = cls.condense_bases(bases, scalar)
-        #if len(key[0]) == 0:
-        #    return key[1]
-        if key not in cls._insts:
-            cls._insts[key] = super().__new__(cls)
-        return cls._insts[key]
-
-    def __init__(self, *bases: int, scalar: Real = 1.0) -> None:
-        self.bases, self.scalar = self.condense_bases(bases, scalar)
-
-    @classmethod
-    def check(cls, obj: Simple) -> Blade:
-        """Check if an object is a primitive real number.
-        If so, promote it to a 0-blade. Otherwise, just return the object.
-        This is mostly used internally.
-
-        ```python
-        >>> isinstance(2, Blade)
-        False
-        >>> isinstance(Blade.x, Blade)
-        True
-        >>> isinstance(Blade.check(2), Blade)
-        True
-        >>> isinstance(Blade.check(Blade.x), Blade)
-        True
-
-        ```
-        """
-        if isinstance(obj, Real):
-            return cls(scalar=obj)
-        return obj
-
-    @staticmethod
-    def condense_bases(bases: Tuple[int, ...], scalar: Real = 1.0) \
-            -> Tuple[Tuple[int, ...], Real]:
-        """Normalize a sequence of bases, modifying the scalar as necessary.
-
-        bases: The tuple of basis indices.
-        scalar: Real number that will scale the resulting blade.
-
-        Returns: a 2-tuple of normalized bases and the modified scalar.
-
-        Examples:
-        ```python
-        >>> Blade.condense_bases((1, 1, 2, 1, 2), 2.0)
-        ((1,), -2.0)
-        >>> Blade.condense_bases((1, 2, 1, 2), 1.5)
-        ((), -1.5)
-        >>> Blade.condense_bases((2, 1, 3, 2, 3, 3), 1.0)
-        ((1, 3), 1.0)
-
-        ```
-        """
-        bases = list(bases)
-        if count_swaps(bases) % 2 == 1:
-            scalar *= -1
-        bases.sort()
-        bases = [basis for basis in set(bases)
-                 for _ in range(bases.count(basis) % 2)]
-        return tuple(bases), scalar
-
-    def __repr__(self) -> str:
-        """Return the representation of this blade.
-
-        If Blade is in the global namespace, this produces
-        eval()-able code that gets the original object back.
-
-        ```python
-        >>> repr(Blade.xyzw)
-        '1.0 * Blade.xyzw'
-        >>> repr(Blade.e1e2e3e4e5)
-        '1.0 * Blade(0, 1, 2, 3, 4)'
-
-        ```
-        """
-        if not self.bases:
-            return repr(self.scalar)
-        if max(self.bases) > 3: # i=3 => e4 = w
-            r = 'Blade(%s)' % ', '.join(map(repr, self.bases))
-        else:
-            r = 'Blade.' + ''.join(NAMES[i] for i in self.bases)
-        return '%r * %s' % (self.scalar, r)
-
-    def __str__(self) -> str:
-        """Return the pretty representation of this blade.
-
-        This prefers basis names over eval()-ability.
-
-        ```python
-        >>> str(Blade.xyzw)
-        '1.00xyzw'
-        >>> str(Blade.e1e2e3e4e5)
-        '1.00e1e2e3e4e5'
-
-        ```
-        """
-        if not self.bases:
-            return str(self.scalar)
-        if max(self.bases) > 3:
-            r = ''.join(f'e{i+1}' for i in self.bases)
-        else:
-            r = ''.join(NAMES[i] for i in self.bases)
-        return '%.2f%s' % (self.scalar, r)
-
-    # Relational operators
-
-    def __eq__(self, other: Simple) -> bool:
-        """Compare equality of two objects.
-
-        Returns: True if this is a scalar blade equal to the real.
-        Returns: True if this blade's bases and scalar equal the other's.
-        Returns: False for all other cases or types.
-
-        ```python
-        >>> Blade._ * 1 == 1
-        True
-        >>> Blade.xy == Blade.xy
-        True
-        >>> Blade.xy == Blade.x + Blade.y
-        False
-
-        ```
-        """
-        if isinstance(other, _Simple):
-            other = Blade.check(other)
-            return (self.bases, self.scalar) == (other.bases, other.scalar)
-        return False
-
-    def __ne__(self, other: Simple) -> bool:
-        """Compare inequality of two objects.
-
-        Returns: False if this is a scalar blade equal to the real.
-        Returns: False if this blade's bases and scalar equal the other's.
-        Returns: True for all other cases or types.
-
-        ```python
-        >>> Blade._ * 1 != 2
-        True
-        >>> Blade.xy * 1 != Blade.xy * 2
-        True
-        >>> Blade.xy != Blade.x + Blade.y
-        True
-
-        ```
-        """
-        return not (self == other)
-
-    def __lt__(self, other: Real) -> bool:
-        """Compare this blade less than an object.
-
-        Returns: True if this is a scalar blade less than the real.
-        Returns: NotImplemented for all other types.
-
-        ```python
-        >>> Blade._ * 1 < 2
-        True
-        >>> Blade.x * 1 < 2
-        Traceback (most recent call last):
-            ...
-        TypeError: '<' not supported between instances of 'Blade' and 'int'
-
-        ```
-        """
-        if not (isinstance(other, Real) and self.bases == ()):
-            return NotImplemented
-        return self.scalar < other
-
-    def __gt__(self, other: Real) -> bool:
-        """Compare this blade greater than an object.
-
-        Returns: True if this is a scalar blade greater than the real.
-        Returns: NotImplemented for all other types.
-
-        ```python
-        >>> Blade._ * 2 > 1
-        True
-        >>> Blade.x * 2 > 1
-        Traceback (most recent call last):
-            ...
-        TypeError: '>' not supported between instances of 'Blade' and 'int'
-
-        """
-        if not (isinstance(other, Real) and self.bases == ()):
-            return NotImplemented
-        return self != other and not (self < other)
-
-    def __le__(self, other: Real) -> bool:
-        """Compare this blade less than or equal to an object.
-
-        Returns: True if this is a scalar blade not greater than the real.
-        Returns: NotImplemented for all other types.
-
-        ```python
-        >>> Blade._ * 1 <= 2
-        True
-        >>> Blade.x * 1 <= 2
-        Traceback (most recent call last):
-            ...
-        TypeError: '<=' not supported between instances of 'Blade' and 'int'
-
-        """
-        if not (isinstance(other, Real) and self.bases == ()):
-            return NotImplemented
-        return self < other or self == other
-
-    def __ge__(self, other: Real) -> bool:
-        """Compare this blade greater than or equal to an object.
-
-        Returns: True if this is a scalar blade not less than the real.
-        Returns: NotImplemented for all other types.
-
-        ```python
-        >>> Blade._ * 2 >= 1
-        True
-        >>> Blade.x * 2 >= 1
-        Traceback (most recent call last):
-            ...
-        TypeError: '>=' not supported between instances of 'Blade' and 'int'
-
-        """
-        if not (isinstance(other, Real) and self.bases == ()):
-            return NotImplemented
-        return not (self < other)
-
-    # Binary operators
-
-    def __add__(self, other: MVV) -> MV:
-        """Add a blade and another object.
-
-        Returns: 0-blade if this blade has grade 0 and the object is scalar.
-        Returns: k-blade with scalars summed if the object is a k-blade.
-        Returns: MultiVector summing this object and the other otherwise.
-
-        ```python
-        >>> Blade._ * 2 + 1
-        3.0
-        >>> isinstance(Blade._ * 2 + 1, Blade)
-        True
-        >>> 2 * Blade.xy + 3 * Blade.xy
-        5.0 * Blade.xy
-        >>> Blade.x + 2 * Blade.y
-        (1.0 * Blade.x + 2.0 * Blade.y)
-        >>> Blade.x + Blade.xy
-        (1.0 * Blade.x + 1.0 * Blade.xy)
-
-        ```
-        """
-        if isinstance(other, Real) and self.bases == ():
-            return Blade(scalar=self.scalar + other)
-        if isinstance(other, Blade) and self.bases == other.bases:
-            return Blade(*self.bases, scalar=self.scalar + other.scalar)
-        if isinstance(other, _MVV):
-            return MultiVector.from_terms(self, other)
-        return NotImplemented
-
-    def __radd__(self, other: Real) -> Blade:
-        """Support adding blades on the right side of scalars.
-
-        ```python
-        >>> 1 + 2 * Blade.x
-        (1.0 + 2.0 * Blade.x)
-        >>> 2 + 3 * Blade._
-        5.0
-        >>> isinstance(2 + 3 * Blade._, Blade)
-        True
-
-        """
-        if isinstance(other, Real):
-            return self + other # scalar addition is commutative
-        return NotImplemented
-
-    def __sub__(self, other: MVV) -> MV:
-        """Subtracting is adding the negation.
-
-        ```python
-        >>> Blade._ * 2 - 1
-        1.0
-        >>> isinstance(Blade._ * 2 - 1, Blade)
-        True
-        >>> 2 * Blade.xy - 3 * Blade.xy
-        -1.0 * Blade.xy
-        >>> Blade.x - 2 * Blade.y
-        (1.0 * Blade.x + -2.0 * Blade.y)
-        >>> Blade.x - Blade.xy
-        (1.0 * Blade.x + -1.0 * Blade.xy)
-
-        ```
-        """
-        return self + (-other)
-
-    def __rsub__(self, other: Real) -> Blade:
-        """Support subtracting blades from scalars.
-
-        ```python
-        >>> 1 - 2 * Blade.x
-        (1.0 + -2.0 * Blade.x)
-        >>> 2 - 3 * Blade._
-        -1.0
-        >>> isinstance(2 - 3 * Blade._, Blade)
-        True
-
-        ```
-        """
-        return other + (-self)
-
-    def __mul__(self, other: Simple) -> Blade:
-        """Multiply a blade and another object.
-
-        Returns: k-blade scaled by object if object is scalar.
-        Returns: The geometric product, if both objects are blades.
-
-        ```python
-        >>> Blade.x * 3 * 2
-        6.0 * Blade.x
-        >>> Blade.x * Blade.y
-        1.0 * Blade.xy
-        >>> Blade.z * 2 * Blade.x
-        -2.0 * Blade.xz
-
-        ```
-        """
-        if isinstance(other, Real):
-            return Blade(*self.bases, scalar=self.scalar * other)
-        if isinstance(other, Blade):
-            return Blade(*self.bases, *other.bases,
-                         scalar=self.scalar * other.scalar)
-        return NotImplemented
-
-    def __rmul__(self, other: Real) -> Blade:
-        """Support multiplying blades on the right side of scalars.
-
-        ```python
-        >>> 2 * Blade.x * 3
-        6.0 * Blade.x
-
-        ```
-        """
-        if isinstance(other, Real):
-            return self * other # scalar multiplication is commutative
-        return NotImplemented
-
-    def __matmul__(self, other: Simple) -> Simple:
-        """Get the inner (dot) product of two objects.
-
-        Returns: The scaled blade when dotting with a scalar.
-        Returns: The inner product of the two blades, which can be scalar 0.
-
-        ```python
-        >>> Blade.x @ 3
-        3.0 * Blade.x
-        >>> Blade.x @ Blade.y
-        0.0
-        >>> Blade.x @ Blade.x
-        1.0
-
-        ```
-        """
-        if not isinstance(other, _Simple):
-            return NotImplemented
-        return (self * other) % abs(self.grade - Blade.check(other).grade)
-
-    dot = inner = __matmul__
-
-    def __rmatmul__(self, other: Real) -> Blade:
-        """Support dotting blades on the right side of scalars.
-
-        ```python
-        >>> 2 @ Blade.x
-        2.0 * Blade.x
-
-        ```
-        """
-        if not isinstance(other, Real):
-            return NotImplemented
-        return (other * self) % abs(Blade.check(other).grade - self.grade)
-
-    def __truediv__(self, other: Simple) -> Blade:
-        """Divide two objects.
-
-        Returns: The scaled blade when dividing by a scalar.
-        Returns: The geometric product of this blade and the other's inverse.
-
-        ```python
-        >>> Blade.x / 2
-        0.5 * Blade.x
-        >>> # dividing basis vectors is the same as multiplying them
-        >>> # since 1/x = x/||x||^2 = x
-        >>> Blade.x / Blade.y
-        1.0 * Blade.xy
-
-        ```
-        """
-        if Blade.check(other).bases == ():
-            return self * (1 / float(other))
-        if isinstance(other, Blade):
-            return self * other / (other * other)
-        return NotImplemented
-
-    def __rtruediv__(self, other: Real) -> Blade:
-        """Divide a scalar by a blade.
-
-        ```python
-        >>> 1 / Blade.x
-        1.0 * Blade.x
-
-        ```
-        """
-        return other * self / (self * self)
-
-    def __mod__(self, other: int) -> Simple:
-        """The choose operator - returns the sum of all blades of grade k.
-        When applied to a blade, returns the blade if k is the blade's grade.
-        Returns scalar 0 otherwise.
-
-        ```python
-        >>> (2 * Blade.x) % 1
-        2.0 * Blade.x
-        >>> (2 * Blade.x) % 2
-        0.0
-        >>> (2 * Blade.xy) % 2
-        2.0 * Blade.xy
-        >>> Blade._ % 0
-        1.0
-
-        ```
-        """
-        return self if self.grade == other else 0.0
-
-    choose = __mod__
-
-    def __pow__(self, other: int, modulo: int = None) -> Simple:
-        """A blade raised to an integer power.
-        A ** n = A * A * A * ... * A n times.
-        A ** -n = 1 / (A ** n)
-        The optional ternary power uses the choose operator afterwards.
-
-        ```python
-        >>> Blade.xy ** 3
-        -1.0 * Blade.xy
-        >>> Blade.y ** -5
-        1.0 * Blade.y
-        >>> pow(Blade.xyz, 3, 3)
-        -1.0 * Blade.xyz
-
-        ```
-        """
-        if not isinstance(other, int):
-            if not self.bases:
-                return float(self) ** other
-            return NotImplemented
-        result = 1
-        for _ in range(abs(other)):
-            result *= self
-        if other < 0:
-            result = 1 / result
-        if modulo is not None:
-            if not isinstance(modulo, int):
-                return NotImplemented
-            return result % modulo
-        return result
-
-    def __rpow__(self, other: Real) -> Simple:
-        """A real number raised to a blade power.
-        x ** A = e ** (A ln x) = e ** (I * a ln x)
-        = cos(a ln x) + sin(a ln x) * I
-
-        ```python
-        >>> from cmath import e, pi, isclose
-        >>> round(e ** (pi / 4 * Blade.xy), 2)
-        (0.71 + 0.71 * Blade.xy)
-        >>> # in 2D, xy is isomorphic to i
-        >>> round(e ** (pi * Blade.xy), 9) == -1
-        True
-        >>> isclose(e ** (pi * 1j), -1)
-        True
-
-        ```
-        """
-        if not isinstance(other, Real):
-            return NotImplemented
-        # Assume this vector is i
-        theta = self.scalar * math.log(other)
-        return math.cos(theta) + Blade(*self.bases, scalar=math.sin(theta))
-
-    def __xor__(self, other: Simple) -> Simple:
-        """Get the outer (wedge) product of two objects.
-        WARNING: Operator precedence puts ^ after +!
-        Make sure to put outer products in parentheses, like this:
-        ``u * v == u @ v + (u ^ v)``
-
-        Returns: The scaled blade when wedging with a scalar.
-        Returns: The outer product of the two blades.
-
-        ```python
-        >>> Blade.x ^ 2
-        2.0 * Blade.x
-        >>> Blade.x ^ Blade.y
-        1.0 * Blade.xy
-        >>> 2 * Blade.x ^ Blade.y ^ 3 * Blade.w
-        6.0 * Blade.xyw
-
-        ```
-        """
-        if not isinstance(other, _Simple):
-            return NotImplemented
-        return (self * other) % (self.grade + Blade.check(other).grade)
-
-    wedge = outer = __xor__
-
-    def __rxor__(self, other: Real) -> Blade:
-        """Support wedging blades on the right side of scalars.
-
-        ```python
-        >>> 2 ^ Blade.x
-        2.0 * Blade.x
-
-        ```
-        """
-        if not isinstance(other, Real):
-            return NotImplemented
-        return (other * self) % (Blade.check(other).grade + self.grade)
-
-    # Unary operators
-
-    def __neg__(self) -> Blade:
-        """The negation of a blade is the blade with its scalar negated.
-
-        ```python
-        >>> -Blade.x
-        -1.0 * Blade.x
-
-        ```
-        """
-        return self * -1
-
-    def __abs__(self) -> Union[Real, complex]:
-        """Get the magnitude of a blade.
-
-        ```python
-        >>> from cmath import isclose
-        >>> abs(Blade.x)
-        1.0
-        >>> isclose(abs(2 * Blade.x * 3 * Blade.y), 6j)
-        True
-
-        ```
-        """
-        # choosing the +ve square root because absolute value is +ve
-        return (self * self) ** .5
-
-    magnitude = __abs__
-
-    def __invert__(self) -> Blade:
-        """A normalized blade is one with a magnitude of 1.
-
-        ```python
-        >>> ~Blade.x # no effect on bases
-        1.0 * Blade.x
-        >>> ~(3 * Blade.xy)
-        1.0 * Blade.xy
-
-        ```
-        """
-        return Blade(*self.bases)
-
-    normalize = __invert__
-
-    def __complex__(self) -> complex:
-        """Convert a scalar blade to a complex number.
-
-        ```python
-        >>> complex(2 * Blade._)
-        (2+0j)
-        >>> complex(3 * Blade.x)
-        Traceback (most recent call last):
-            ...
-        TypeError: cannot convert non-scalar blade (3.0 * Blade.x) to complex
-
-        ```
-        """
-        if self.bases == ():
-            return complex(self.scalar)
-        raise TypeError(
-            'cannot convert non-scalar blade (%r) to complex' % self)
-
-    def __int__(self) -> int:
-        """Convert a scalar blade to an integer.
-
-        ```python
-        >>> int(2 * Blade._)
-        2
-        >>> int(3 * Blade.x)
-        Traceback (most recent call last):
-            ...
-        TypeError: cannot convert non-scalar blade (3.0 * Blade.x) to int
-
-        ```
-        """
-        if self.bases == ():
-            return int(self.scalar)
-        raise TypeError('cannot convert non-scalar blade (%r) to int' % self)
-
-    def __float__(self) -> float:
-        """Convert a scalar blade to a float.
-        NOTE: This converts scalar blades only! To get the magnitude
-        of a blade, use ``abs(blade)``.
-
-        ```python
-        >>> float(2 * Blade._)
-        2.0
-        >>> float(3 * Blade.x)
-        Traceback (most recent call last):
-            ...
-        TypeError: cannot convert non-scalar blade (3.0 * Blade.x) to float
-
-        ```
-        """
-        if self.bases == ():
-            return float(self.scalar)
-        raise TypeError('cannot convert non-scalar blade (%r) to float' % self)
-
-    def __index__(self) -> int:
-        """Convert a scalar blade to an index.
-
-        ```python
-        >>> 'abcde'[2 * Blade._]
-        'c'
-        >>> 'abcde'[3 * Blade.x]
-        Traceback (most recent call last):
-            ...
-        TypeError: cannot convert non-scalar blade (3.0 * Blade.x) to int
-        >>> 'abcde'[1.5 * Blade._]
-        Traceback (most recent call last):
-            ...
-        TypeError: cannot losslessly convert float 1.5 to index
-
-        ```
-        """
-        if int(self) == float(self):
-            return int(self)
-        raise TypeError('cannot losslessly convert float %r to index' % self)
-
-    def __round__(self, ndigits: int = None) -> Blade:
-        """Round the scalar value of a blade.
-
-        ```python
-        >>> round(1.26 * Blade.xy, 1)
-        1.3 * Blade.xy
-        >>> round(3.7 * Blade.zw)
-        4 * Blade.zw
-
-        ```
-        """
-        return Blade(*self.bases, scalar=round(self.scalar, ndigits))
-
-    def __trunc__(self) -> Blade:
-        """Truncate the scalar value of a blade.
-
-        ```python
-        >>> import math
-        >>> math.trunc(1.2 * Blade.xy)
-        1 * Blade.xy
-        >>> math.trunc(-1.2 * Blade.zw)
-        -1 * Blade.zw
-
-        ```
-        """
-        return Blade(*self.bases, scalar=math.trunc(self.scalar))
-
-    def __floor__(self) -> Blade:
-        """Floor the scalar value of a blade.
-
-        ```python
-        >>> import math
-        >>> math.floor(1.2 * Blade.xy)
-        1 * Blade.xy
-        >>> math.floor(-1.2 * Blade.zw)
-        -2 * Blade.zw
-
-        ```
-        """
-        return Blade(*self.bases, scalar=math.floor(self.scalar))
-
-    def __ceil__(self) -> Blade:
-        """Ceiling the scalar value of a blade.
-
-        ```python
-        >>> import math
-        >>> math.ceil(1.2 * Blade.xy)
-        2 * Blade.xy
-        >>> math.ceil(-1.2 * Blade.zw)
-        -1 * Blade.zw
-
-        ```
-        """
-        return Blade(*self.bases, scalar=math.ceil(self.scalar))
+    idxs = idxs_to_idxs(idxs)
+    if max(idxs) > 3:
+        return sep.join(f'e{i+1}' for i in idxs)
+    return sep.join(NAMES[i] for i in idxs)
+
+def condense_bases(bases: Tuple[int, ...], scalar: Scalar_a = None) \
+        -> Tuple[Tuple[int, ...], Scalar_a]:
+    """Normalize a sequence of bases, modifying the scalar as necessary.
+
+    bases: The tuple of basis indices.
+    scalar: Real number that will scale the resulting bases.
+
+    Returns: a 2-tuple of normalized bases and the modified scalar.
+
+    Examples:
+    ```python
+    >>> condense_bases((1, 1, 2, 1, 2), 2.0)
+    ((1,), -2.0)
+    >>> condense_bases((1, 2, 1, 2), 1.5)
+    ((), -1.5)
+    >>> condense_bases((2, 1, 3, 2, 3, 3), 1.0)
+    ((1, 3), 1.0)
+
+    ```
+    """
+    bases = list(bases)
+    if scalar is None:
+        scalar = Scalar_f('1')
+    if count_swaps(bases) % 2:
+        scalar *= Scalar_f('-1')
+    bases.sort()
+    bases = [basis for basis in set(bases)
+                for _ in range(bases.count(basis) % 2)]
+    return tuple(bases), scalar
 
 class MultiVector:
-    """Two or more incompatible blades, summed together.
+    """The sum of one or more blades.
 
     The bare constructor is not meant for regular use.
     Use the factory ``MultiVector.from_terms()`` instead.
 
     Basis vector names can be swizzled on instances:
     ```python
-    >>> (Blade.x + Blade.y).x
+    >>> from multivectors import x, y, z
+    >>> (x + y).x
     1.0
-    >>> (Blade.x * Blade.y + Blade.z).xy
+    >>> (x*y + z).xy
     1.0
-    >>> (Blade.x + Blade.y).e3
+    >>> (x + y).e3
     0.0
 
     ```
     And indices can be combined:
     ```python
-    >>> (Blade.x + Blade.y)[0]
+    >>> (x + y) % 0
     1.0
-    >>> (Blade.x * Blade.y + Blade.z)[0, 1]
+    >>> (x*y + z) % (0, 1)
     1.0
-    >>> (Blade.x + Blade.y)[2]
+    >>> (x + y) % 2
     0.0
 
     ```
     """
 
-    termdict: Dict[Tuple[int, ...], Real]
+    termdict: TermDict
 
     @property
-    def terms(self) -> Tuple[Blade, ...]:
+    def grade(self) -> Union[int, None]:
+        """The grade of this blade.
+
+        Returns: None if this multivector is not a blade (one term)
+        Returns: the number of different bases this blade consists of
+
+        ```python
+        >>> from multivectors import x, y, z
+        >>> (x + y).grade
+        >>> (z * 2 + z).grade
+        1
+        >>> (x*y*z).grade
+        3
+
+        ```
+        """
+        if len(self.termdict) != 1:
+            return None
+        (bases,) = self.termdict.keys()
+        return len(bases)
+
+    @property
+    def terms(self) -> Tuple[MultiVector, ...]:
         """Get a sequence of blades comprising this multivector.
 
         ```python
-        >>> (Blade.x + Blade.y).terms
-        (1.0 * Blade.x, 1.0 * Blade.y)
-        >>> ((Blade.x + Blade.y) * (Blade.z + Blade.w)).terms
-        (1.0 * Blade.xz, 1.0 * Blade.xw, 1.0 * Blade.yz, 1.0 * Blade.yw)
+        >>> from multivectors import x, y, z, w
+        >>> (x + y).terms
+        ((1.0 * x), (1.0 * y))
+        >>> ((x + y) * (z + w)).terms
+        ((1.0 * x*z), (1.0 * x*w), (1.0 * y*z), (1.0 * y*w))
 
         ```
         """
-        keys = sorted(self.termdict.keys(), key=lambda b: (len(b), b))
-        return tuple(Blade(*key, scalar=self.termdict[key]) for key in keys)
+        items = sorted(self.termdict.items(), key=lambda i: (len(i[0]), i[0]))
+        return tuple(MultiVector({key: value}) for key, value in items)
 
-    def __init__(self, termdict: Dict[Tuple[int, ...], Real]):
-        self.termdict = termdict.copy()
+    def __init__(self, termdict: TermDict):
+        self.termdict = {b: Scalar_f(s) for b, s in termdict.items()
+                         if s != Scalar_f()}
+        self.termdict = self.termdict or {(): Scalar_f()}
 
     @classmethod
-    def from_terms(cls, *terms: MV) -> MV:
+    def from_terms(cls, *terms: SOV) -> MultiVector:
         """Create a multivector from a sequence of terms.
-        This may return something other than a MultiVector
-        if it is the only term or there are no terms.
 
         ```python
-        >>> MultiVector.from_terms(Blade.x, Blade.y)
-        (1.0 * Blade.x + 1.0 * Blade.y)
+        >>> from multivectors import x, y, z
+        >>> MultiVector.from_terms(x, y)
+        (1.0 * x + 1.0 * y)
         >>> MultiVector.from_terms()
-        0.0
-        >>> MultiVector.from_terms(Blade.z)
-        1.0 * Blade.z
-        >>> MultiVector.from_terms(2 * Blade.x, Blade.x)
-        3.0 * Blade.x
+        (0.0)
+        >>> MultiVector.from_terms(z)
+        (1.0 * z)
+        >>> MultiVector.from_terms(2 * x, x)
+        (3.0 * x)
 
         ```
         """
-        terms: List[Simple] = [
+        termseq = [
             t for term in terms for t in
-            (term.terms if isinstance(term, MultiVector) else (term,))
+            (term if isinstance(term, MultiVector)
+             else MultiVector({(): term})).termdict.items()
         ]
-        termdict: Dict[Tuple[int, ...], List[Real]] = {}
-        for t in terms:
-            if abs(t) == 0:
-                continue
-            if isinstance(t, Real):
-                t = Blade(scalar=t)
-            termdict.setdefault(t.bases, []).append(t.scalar)
-        d = {b: math.fsum(s) for b, s in termdict.items()}
-        for key in [k for k in d if d[k] == 0]:
-            del d[key]
-        inst = cls(d)
-        ts = list(inst.terms)
-        if not ts:
-            return 0.0
-        if len(ts) == 1:
-            return ts[0]
-        return inst
+        termdict: Dict[Tuple[int, ...], List[Scalar_a]] = {}
+        for bases, scalar in termseq:
+            termdict.setdefault(bases, []).append(scalar)
+        d = {b: Scalar_f(sum(s)) for b, s in termdict.items()}
+        d = {b: s for b, s in d.items() if s != Scalar_f()} # discard zeroes
+        return cls(d)
 
-    def __getattr__(self, name: str) -> Union[Real, Tuple[Real, ...]]:
+    def __getattr__(self, name: str) -> Scalar_a:
         """Support basis name swizzling."""
-        return self.termdict.get(tuple(names_to_idxs(name)), 0.0)
+        return self.termdict.get(tuple(names_to_idxs(name)), Scalar_f())
 
-    def __getitem__(self, idxs: Index) -> Union[Real, Tuple[Real]]:
-        """Support index swizzling."""
-        return self.termdict.get(tuple(idxs_to_idxs(idxs)), 0.0)
+    def __getitem__(self, grades: Index) -> MultiVector:
+        """The choose operator - returns the sum of all blades of grade k.
+
+        Examples:
+        ```python
+        >>> from multivectors import x, y, z
+        >>> (1 + 2*x + 3*y + 4*x*y)[1]
+        (2.0 * x + 3.0 * y)
+        >>> (1 + 2 + 3*x + 4*x*y + 5*y*z)[2]
+        (4.0 * x*y + 5.0 * y*z)
+        >>> (1 + 2 + 3*x + 4*x*y + 5*y*z)[0]
+        (3.0)
+        >>> (1 + 2 + 3*x + 4*x*y + 5*y*z).choose(0)
+        (3.0)
+        >>> (1 + 2*x + 3*x*y)[:2]
+        (1.0 + 2.0 * x)
+
+        ```
+        """
+        grades = set(idxs_to_idxs(grades))
+        return MultiVector({
+            bases: scalar for bases, scalar in self.termdict.items()
+            if len(bases) in grades})
+
+    choose = __getitem__
 
     def __repr__(self) -> str:
         """Return a representation of this multivector.
         Depending on the global namespace, this may be eval()-able.
 
         ```python
-        >>> repr(Blade.x + Blade.y)
-        '(1.0 * Blade.x + 1.0 * Blade.y)'
-        >>> repr(Blade.yz - Blade.xw)
-        '(-1.0 * Blade.xw + 1.0 * Blade.yz)'
+        >>> from multivectors import x, y, z, w
+        >>> repr(x + y)
+        '(1.0 * x + 1.0 * y)'
+        >>> repr(y*z - x*w)
+        '(-1.0 * x*w + 1.0 * y*z)'
 
         ```
         """
-        return '(' + ' + '.join(map(repr, self.terms)) + ')'
+        if self.grade is not None:
+            ((bases, scalar),) = self.termdict.items()
+            if bases == ():
+                return '(%r)' % scalar
+            return '(%r * %s)' % (scalar, idxs_to_names(bases, '*'))
+        return '(' + ' + '.join(repr(t).strip('()') for t in self.terms) + ')'
 
     def __str__(self) -> str:
         """Return a representation of this multivector suited for showing.
 
         ```python
-        >>> str(Blade.x + Blade.y)
+        >>> from multivectors import x, y, z, w
+        >>> str(x + y)
         '(1.00x + 1.00y)'
-        >>> str(Blade.yz - Blade.xw)
+        >>> str(y*z - x*w)
         '(-1.00xw + 1.00yz)'
 
         ```
         """
+        if self.grade is not None:
+            ((bases, scalar),) = self.termdict.items()
+            if bases == ():
+                return str(scalar)
+            return '%.2f%s' % (scalar, idxs_to_names(bases))
         return '(' + ' + '.join(map(str, self.terms)) + ')'
 
     # Relational operators
 
-    def __eq__(self, other: MultiVector) -> bool:
+    def __eq__(self, other: SOV) -> bool:
         """Compare equality of two objects.
 
         Returns: True if all terms of this multivector are equal to the other.
+        Returns: True if this multivector is scalar and equals the other.
         Returns: False for all other cases or types.
 
         ```python
-        >>> Blade.x + Blade.y == Blade.y + Blade.x
+        >>> from multivectors import x, y
+        >>> x + y == y + x
         True
-        >>> Blade.x + 2 * Blade.y == 2 * Blade.x + Blade.y
+        >>> x + 2*y == 2*x + y
         False
 
         ```
         """
         if not isinstance(other, MultiVector):
-            return False
+            if self.grade != 0:
+                return False # this MV is not a scalar
+            return self._ == other
         return self.termdict == other.termdict
 
-    def __ne__(self, other: MultiVector) -> bool:
+    def __ne__(self, other: SOV) -> bool:
         """Compare inequality of two objects.
 
         Returns: False if all terms of this multivector are equal to the other.
+        Returns: False if this multivector is scalar and equals the other.
         Returns: True for all other cases or types.
 
         ```python
-        >>> Blade.x + Blade.y != Blade.y + Blade.x
+        >>> from multivectors import x, y
+        >>> x + y != y + x
         False
-        >>> Blade.x + 2 * Blade.y != 2 * Blade.x + Blade.y
+        >>> x + 2*y != 2*x + y
         True
 
         ```
         """
         return not (self == other)
 
+    def __lt__(self, other: Scalar_a) -> bool:
+        """Compare this blade less than an object.
+
+        Returns: True if this is a scalar blade less than the scalar.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> _ * 1 < 2
+        True
+        >>> _ * 2 < 1
+        False
+        >>> x * 1 < 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '<' not supported between instances of \
+'MultiVector' and 'int'
+
+        ```
+        """
+        if not isinstance(other, Scalar_t) or self.grade != 0:
+            return NotImplemented
+        return self._ < other
+
+    def __gt__(self, other: Scalar_a) -> bool:
+        """Compare this blade greater than an object.
+
+        Returns: True if this is a scalar blade greater than the scalar.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> _ * 1 > 2
+        False
+        >>> _ * 2 > 1
+        True
+        >>> x * 1 > 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '>' not supported between instances of \
+'MultiVector' and 'int'
+
+        ```
+        """
+        if not isinstance(other, Scalar_t) or self.grade != 0:
+            return NotImplemented
+        return self._ > other
+
+    def __le__(self, other: Scalar_a) -> bool:
+        """Compare this blade less than or equal to an object.
+
+        Returns: True if this is a scalar blade not greater than the scalar.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> _ * 1 <= 2
+        True
+        >>> _ * 2 <= 2
+        True
+        >>> _ * 2 <= 1
+        False
+        >>> x * 1 <= 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '<=' not supported between instances of \
+'MultiVector' and 'int'
+
+        ```
+        """
+        if not isinstance(other, Scalar_t) or self.grade != 0:
+            return NotImplemented
+        return self._ <= other
+
+    def __ge__(self, other: Scalar_a) -> bool:
+        """Compare this blade greater than or equal to an object.
+
+        Returns: True if this is a scalar blade not less than the scalar.
+        Returns: NotImplemented for all other types.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> _ * 1 >= 2
+        False
+        >>> _ * 2 >= 2
+        True
+        >>> _ * 2 >= 1
+        True
+        >>> x * 1 >= 2
+        Traceback (most recent call last):
+            ...
+        TypeError: '>=' not supported between instances of \
+'MultiVector' and 'int'
+
+        ```
+        """
+        if not isinstance(other, Scalar_t) or self.grade != 0:
+            return NotImplemented
+        return self._ >= other
+
     # Binary operators
 
-    def __add__(self, other: MVV) -> MV:
+    def __add__(self, other: SOV) -> MultiVector:
         """Add a multivector and another object.
 
         Returns: The sum of the terms of this multivector and the other.
-        Returns: The other object added to this multivector's terms.
+        Returns: The scalar added to this multivector's terms.
 
         ```python
-        >>> (Blade.x + Blade.z) + (Blade.y + Blade.w)
-        (1.0 * Blade.x + 1.0 * Blade.y + 1.0 * Blade.z + 1.0 * Blade.w)
-        >>> (Blade.x + Blade.z) + Blade.y
-        (1.0 * Blade.x + 1.0 * Blade.y + 1.0 * Blade.z)
+        >>> from multivectors import x, y, z, w
+        >>> (x + z) + (y + w)
+        (1.0 * x + 1.0 * y + 1.0 * z + 1.0 * w)
+        >>> (x + z) + y
+        (1.0 * x + 1.0 * y + 1.0 * z)
 
         ```
         """
         if isinstance(other, MultiVector):
             return self.from_terms(*self.terms, *other.terms)
-        if isinstance(other, _Simple):
+        if isinstance(other, Scalar_t):
             return self.from_terms(*self.terms, other)
         return NotImplemented
 
-    def __radd__(self, other: MVV) -> MV:
+    def __radd__(self, other: Scalar_a) -> MultiVector:
         """Support adding multivectors on the right side of objects.
 
         ```python
-        >>> 1 + (Blade.x + Blade.z)
-        (1.0 + 1.0 * Blade.x + 1.0 * Blade.z)
-        >>> Blade.x + (Blade.y + Blade.z)
-        (1.0 * Blade.x + 1.0 * Blade.y + 1.0 * Blade.z)
+        >>> from multivectors import x, y, z
+        >>> 1 + (x + z)
+        (1.0 + 1.0 * x + 1.0 * z)
+        >>> x + (y + z)
+        (1.0 * x + 1.0 * y + 1.0 * z)
 
         ```
         """
         if isinstance(other, MultiVector):
             return self.from_terms(*other.terms, *self.terms)
-        if isinstance(other, _Simple):
+        if isinstance(other, Scalar_t):
             return self.from_terms(other, *self.terms)
         return NotImplemented
 
-    def __sub__(self, other: MVV) -> MV:
+    def __sub__(self, other: SOV) -> MultiVector:
         """Subtracting is adding the negation.
 
         ```python
-        >>> (Blade.x + Blade.z) - (Blade.y + Blade.w)
-        (1.0 * Blade.x + -1.0 * Blade.y + 1.0 * Blade.z + -1.0 * Blade.w)
-        >>> (Blade.x + Blade.z) - Blade.y
-        (1.0 * Blade.x + -1.0 * Blade.y + 1.0 * Blade.z)
+        >>> from multivectors import x, y, z, w
+        >>> (x + z) - (y + w)
+        (1.0 * x + -1.0 * y + 1.0 * z + -1.0 * w)
+        >>> (x + z) - y
+        (1.0 * x + -1.0 * y + 1.0 * z)
 
         ```
         """
         return self + (-other)
 
-    def __rsub__(self, other: MVV) -> MV:
+    def __rsub__(self, other: Scalar_a) -> MultiVector:
         """Support subtracting multivectors from objects.
 
         ```python
-        >>> 1 - (Blade.x + Blade.z)
-        (1.0 + -1.0 * Blade.x + -1.0 * Blade.z)
-        >>> Blade.x - (Blade.y + Blade.z)
-        (1.0 * Blade.x + -1.0 * Blade.y + -1.0 * Blade.z)
+        >>> from multivectors import x, y, z, w
+        >>> 1 - (x + z)
+        (1.0 + -1.0 * x + -1.0 * z)
+        >>> x - (y + z)
+        (1.0 * x + -1.0 * y + -1.0 * z)
 
         ```
         """
         return other + (-self)
 
-    def __mul__(self, other: MVV) -> MV:
+    def __mul__(self, other: SOV) -> MultiVector:
         """Multiply a multivector and another object.
 
         Returns: (a+b)*(c+d)=a*c+a*d+b*c+b*d for multivectors (a+b) and (c+d)
-        Returns: (a+b)*v = a*v + b*v for multivector (a+b) and simple v
+        Returns: (a+b)*v = a*v + b*v for multivector (a+b) and scalar v
 
         ```python
-        >>> (Blade.x + Blade.y) * (Blade.z + Blade.w)
-        (1.0 * Blade.xz + 1.0 * Blade.xw + 1.0 * Blade.yz + 1.0 * Blade.yw)
-        >>> (Blade.x + Blade.y) * 3
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> (Blade.x + Blade.y) * Blade.x
-        (1.0 + -1.0 * Blade.xy)
+        >>> from multivectors import x, y, z, w
+        >>> (x + y) * (z + w)
+        (1.0 * x*z + 1.0 * x*w + 1.0 * y*z + 1.0 * y*w)
+        >>> (x + y) * 3
+        (3.0 * x + 3.0 * y)
+        >>> (x + y) * x
+        (1.0 + -1.0 * x*y)
 
         ```
         """
         if isinstance(other, MultiVector):
+            if self.grade is not None and other.grade is not None:
+                ((bases1, scalar1),) = self.termdict.items()
+                ((bases2, scalar2),) = other.termdict.items()
+                (bases, scalar) = condense_bases(
+                    (*bases1, *bases2), scalar1 * scalar2)
+                return MultiVector({bases: scalar})
             return self.from_terms(*(a * b for b in other.terms
                                      for a in self.terms))
-        if isinstance(other, _Simple):
-            return self.from_terms(*(t * other for t in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(t * self.from_terms(other) for t in self.terms))
         return NotImplemented
 
-    def __rmul__(self, other: Simple) -> MV:
-        """Support multiplying multivectors on the right side of simples.
+    def __rmul__(self, other: Scalar_a) -> MultiVector:
+        """Support multiplying multivectors on the right side of scalars.
 
         ```python
-        >>> 3 * (Blade.x + Blade.y)
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> Blade.y * (Blade.x + Blade.y)
-        (1.0 + -1.0 * Blade.xy)
+        >>> from multivectors import x, y
+        >>> 3 * (x + y)
+        (3.0 * x + 3.0 * y)
+        >>> y * (x + y)
+        (1.0 + -1.0 * x*y)
 
         ```
         """
-        if isinstance(other, _Simple):
-            return self.from_terms(*(other * t for t in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(self.from_terms(other) * t
+                                     for t in self.terms))
         return NotImplemented
 
-    def __matmul__(self, other: MVV) -> MV:
+    def __matmul__(self, other: SOV) -> MultiVector:
         """Get the inner (dot) product of two objects.
 
+        Returns: u@v = (u*v)[abs(u.grade-v.grade)] when grade is defined
         Returns: (a+b)@(c+d)=a@c+a@d+b@c+b@d for multivectors (a+b) and (c+d)
-        Returns: (a+b)@v = a@v + b@v for multivector (a+b) and simple v
+        Returns: (a+b)@v = a@v + b@v for multivector (a+b) and scalar v
 
         ```python
-        >>> (2 * Blade.x + 3 * Blade.y) @ (4 * Blade.x + 5 * Blade.y)
-        23.0
-        >>> (2 * Blade.xy) @ (3 * Blade.yz)
-        0.0
-        >>> (Blade.x + Blade.y) @ 3
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> (Blade.x + Blade.y) @ Blade.x
-        1.0
+        >>> from multivectors import x, y, z
+        >>> (2*x + 3*y) @ (4*x + 5*y)
+        (23.0)
+        >>> (2*x*y).dot(3*y*z)
+        (0.0)
+        >>> (x + y).inner(3)
+        (3.0 * x + 3.0 * y)
+        >>> (x + y) @ x
+        (1.0)
 
         ```
         """
         if isinstance(other, MultiVector):
+            if self.grade is not None and other.grade is not None:
+                return (self * other)[abs(self.grade - other.grade)]
             return self.from_terms(*(
-                Blade.check(a) @ Blade.check(b)
-                for b in other.terms for a in self.terms))
-        if isinstance(other, _Simple):
-            return self.from_terms(*(
-                Blade.check(t) @ Blade.check(other)
-                for t in self.terms))
+                a @ b for b in other.terms for a in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(t @ self.from_terms(other)
+                                     for t in self.terms))
         return NotImplemented
 
     dot = inner = __matmul__
 
-    def __rmatmul__(self, other: Simple) -> MV:
+    def __rmatmul__(self, other: Scalar_a) -> MultiVector:
         """Support dotting multivectors on the right hand side.
 
-        Returns: v@(a+b) = v@a + v@b for multivector (a+b) and simple v
+        Returns: v@(a+b) = v@a + v@b for multivector (a+b) and scalar v
 
         ```python
-        >>> 3 @ (Blade.x + Blade.y)
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> Blade.x @ (Blade.x + Blade.y)
-        1.0
+        >>> from multivectors import x, y
+        >>> 3 @ (x + y)
+        (3.0 * x + 3.0 * y)
+        >>> x @ (x + y)
+        (1.0)
 
         ```
         """
-        if isinstance(other, _Simple):
-            return self.from_terms(*(
-                Blade.check(other) @ Blade.check(t)
-                for t in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(self.from_terms(other) @ t
+                                     for t in self.terms))
         return NotImplemented
 
-    def __truediv__(self, other: Simple) -> MV:
+    def __truediv__(self, other: SOV) -> MultiVector:
         """Divide two objects.
 
-        Returns: (a+b)/v = a/v + b/v for multivector (a+b) and simple v
+        Returns: (a+b)/v = a/v + b/v
 
         ```python
-        >>> (6 * Blade.x + 9 * Blade.y) / 3
-        (2.0 * Blade.x + 3.0 * Blade.y)
-        >>> (6 * Blade.x + 9 * Blade.y) / (3 * Blade.x)
-        (2.0 + -3.0 * Blade.xy)
+        >>> from multivectors import x, y
+        >>> (6*x + 9*y) / 3
+        (2.0 * x + 3.0 * y)
+        >>> (6*x + 9*y) / (3*x)
+        (2.0 + -3.0 * x*y)
 
         ```
         """
-        if isinstance(other, _Simple):
-            return self.from_terms(*(t / other for t in self.terms))
-        return NotImplemented
+        if not isinstance(other, Scalar_t):
+            if not isinstance(other, MultiVector):
+                return NotImplemented
+            if other.grade is None:
+                return NotImplemented
+        other = 1 / other
+        return MultiVector.from_terms(*(t * other for t in self.terms))
 
-    def __mod__(self, grade: int) -> MVV:
-        """The choose operator - returns the sum of all blades of grade k.
+    def __rtruediv__(self, other: Scalar_a) -> MultiVector:
+        """Divide a scalar by a multivector. Only defined for blades.
 
-        Examples:
         ```python
-        >>> (1 + 2 * Blade.x + 3 * Blade.y + 4 * Blade.xy) % 1
-        (2.0 * Blade.x + 3.0 * Blade.y)
-        >>> (1 + 2 + 3 * Blade.x + 4 * Blade.xy + 5 * Blade.yz) % 2
-        (4.0 * Blade.xy + 5.0 * Blade.yz)
-        >>> (1 + 2 + 3 * Blade.x + 4 * Blade.xy + 5 * Blade.yz) % 0
-        3.0
+        >>> from multivectors import x, y
+        >>> 1 / x
+        (1.0 * x)
+        >>> 2 / (4 * x*y)
+        (-0.5 * x*y)
+
+        ```
         """
-        if not isinstance(grade, int):
-            return NotImplemented
-        bs = set(basis for bases in self.termdict.keys() for basis in bases)
-        return sum(Blade(*bases, scalar=self[bases])
-                   for bases in combinations(bs, grade))
+        if self.grade is None:
+            raise TypeError('cannot take inverse of multivector '
+                            'with more than one term')
+        return other * self / (self * self)._
 
-    choose = __mod__
+    def __mod__(self, idxs: Index) -> Scalar_a:
+        """Support index swizzling.
 
-    def __pow__(self, other: int, modulo: int = None) -> MVV:
+        ```python
+        >>> from multivectors import x, y
+        >>> (x + y) % 0
+        1.0
+        >>> v = 1 + 2*y + 3*x*y
+        >>> v % ()
+        1.0
+        >>> v % 1
+        2.0
+        >>> v % (0, 1)
+        3.0
+        >>> v % 2
+        0.0
+
+        ```
+        """
+        return self.termdict.get(tuple(idxs_to_idxs(idxs)), Scalar_f())
+
+    def __pow__(self, other: int) -> MultiVector:
         """A multivector raised to an integer power.
         V ** n = V * V * V * ... * V n times.
-        The optional ternary power uses the choose operator afterwards.
-        Note that unlike blades, multivectors do not have inverses, so
-        negative powers are not supported.
+        V ** -n = 1 / (V ** n)
 
         ```python
-        >>> (Blade.x + Blade.y) ** 3
-        (2.0 * Blade.x + 2.0 * Blade.y)
-        >>> pow(Blade.x + Blade.yz, 3, 2)
-        2.0 * Blade.yz
+        >>> from multivectors import x, y
+        >>> (x + y) ** 3
+        (2.0 * x + 2.0 * y)
+        >>> (2 * x*y) ** -5
+        (-0.03125 * x*y)
 
         """
-        if not isinstance(other, int) or other < 0:
+        if not isinstance(other, int):
             return NotImplemented
-        result = 1
-        for _ in range(other):
+        result = MultiVector({(): Scalar_f('1')})
+        for _ in range(abs(other)):
             result *= self
-        if modulo is not None:
-            if not isinstance(modulo, int):
-                return NotImplemented
-            return result % modulo
+        if other < 0:
+            return Scalar_f('1') / result
         return result
 
-    def __rpow__(self, other: Real) -> MVV:
+    def __rpow__(self, other: Scalar_a) -> MultiVector:
         """A real number raised to a multivector power.
-        x ** V = Product of x ** Vi = Product of e ** (Vi ln x)
-        = Product of (cos(ai ln x) + sin(ai ln x) * Ii)
+        x ** V = Product of x ** V_i = Product of e ** (V_i ln x)
+        = Product of (cos(a_i ln x) + sin(a_i ln x) * Ii)
 
         ```python
         >>> from math import e, pi
-        >>> round(e ** (pi/4 * (Blade.x + Blade.y)), 2)
-        (0.5 + 0.5 * Blade.x + 0.5 * Blade.y + 0.5 * Blade.xy)
-        >>> round(e ** (pi * (Blade.x + Blade.y)), 2)
-        1.0
+        >>> from multivectors import x, y
+        >>> round(e ** (pi/4 * (x + y)), 2)
+        (0.5 + 0.5 * x + 0.5 * y + 0.5 * x*y)
+        >>> round(e ** (pi * (x + y)), 2)
+        (1.0)
 
         ```
         """
-        if not isinstance(other, Real):
+        if not isinstance(other, Scalar_t):
             return NotImplemented
-        result = 1
+        result = MultiVector({(): Scalar_f('1')})
         for t in self.terms:
-            result *= other ** t
+            ((bases, scalar),) = t.termdict.items()
+            theta = scalar * Scalar_f(math.log(other))
+            result *= Scalar_f(math.cos(theta)) + MultiVector({
+                bases: Scalar_f(math.sin(theta))})
         return result
 
-    def __xor__(self, other: MVV) -> MV:
+    def __xor__(self, other: SOV) -> MultiVector:
         """Get the outer (wedge) product of two objects.
         WARNING: Operator precedence puts ^ after +!
         Make sure to put outer products in parentheses, like this:
         ``u * v == u @ v + (u ^ v)``
 
+        Returns: u^v = (u*v)[u.grade+v.grade] when grade is defined
         Returns: (a+b)^(c+d)=(a^c)+(a^d)+(b^c)+(b^d) for (a+b), (c+d)
-        Returns: (a+b)^v = (a^v) + (b^v) for multivector (a+b) and simple v
+        Returns: (a+b)^v = (a^v) + (b^v) for multivector (a+b) and scalar v
 
         ```python
-        >>> (2 * Blade.x + 3 * Blade.y) ^ (4 * Blade.x + 5 * Blade.y)
-        -2.0 * Blade.xy
-        >>> (2 * Blade.xy) ^ (3 * Blade.yz)
-        0.0
-        >>> (Blade.x + Blade.y) ^ 3
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> (Blade.x + Blade.y) ^ Blade.x
-        -1.0 * Blade.xy
+        >>> from multivectors import x, y, z
+        >>> (2*x + 3*y) ^ (4*x + 5*y)
+        (-2.0 * x*y)
+        >>> (2*x*y).wedge(3*y*z)
+        (0.0)
+        >>> (x + y).outer(3)
+        (3.0 * x + 3.0 * y)
+        >>> (x + y) ^ x
+        (-1.0 * x*y)
 
         ```
         """
         if isinstance(other, MultiVector):
+            if self.grade is not None and other.grade is not None:
+                return (self * other)[self.grade + other.grade]
             return self.from_terms(*(
-                Blade.check(a) ^ Blade.check(b)
-                for b in other.terms for a in self.terms))
-        if isinstance(other, _Simple):
-            return self.from_terms(*(
-                Blade.check(t) ^ Blade.check(other)
-                for t in self.terms))
+                a ^ b for b in other.terms for a in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(t ^ self.from_terms(other)
+                                     for t in self.terms))
         return NotImplemented
 
     wedge = outer = __xor__
 
-    def __rxor__(self, other: Simple) -> MV:
+    def __rxor__(self, other: Scalar_a) -> MultiVector:
         """Support wedging multivectors on the right hand side.
 
         Returns: v@(a+b) = v@a + v@b for multivector (a+b) and simple v
 
         ```python
-        >>> 3 ^ (Blade.x + Blade.y)
-        (3.0 * Blade.x + 3.0 * Blade.y)
-        >>> Blade.x ^ (Blade.x + Blade.y)
-        1.0 * Blade.xy
+        >>> from multivectors import x, y
+        >>> 3 ^ (x + y)
+        (3.0 * x + 3.0 * y)
+        >>> x ^ (x + y)
+        (1.0 * x*y)
 
         ```
         """
-        if isinstance(other, _Simple):
-            return self.from_terms(*(
-                Blade.check(other) ^ Blade.check(t)
-                for t in self.terms))
+        if isinstance(other, Scalar_t):
+            return self.from_terms(*(self.from_terms(other) ^ t
+                                     for t in self.terms))
         return NotImplemented
 
     # Unary operators
@@ -1374,102 +849,189 @@ class MultiVector:
         """The negation of a multivector is the negation of all its terms.
 
         ```python
-        >>> -(2 * Blade.x + 3 * Blade.yz)
-        (-2.0 * Blade.x + -3.0 * Blade.yz)
+        >>> from multivectors import x, y, z
+        >>> -(2*x + 3*y*z)
+        (-2.0 * x + -3.0 * y*z)
 
         ```
         """
-        return self.from_terms(*(-t for t in self.terms))
+        return MultiVector({b: -s for b, s in self.termdict.items()})
 
-    def __abs__(self) -> Real:
-        """The magnitude of a multivector is the square root of
-        the sum of the squares of its terms.
-
-        ```python
-        >>> abs(Blade.x + Blade.y + Blade.z + Blade.w)
-        2.0
-        >>> abs(2 ** 1.5 * Blade.x + 2 ** 1.5 * Blade.y)
-        4.0
-
-        ```
-        """
-        return math.fsum(t * t for t in self.terms) ** .5
-
-    magnitude = __abs__
-
-    def __invert__(self) -> MultiVector:
+    def __pos__(self) -> MultiVector:
         """A normalized multivector is one scaled down by its magnitude.
 
         ```python
-        >>> ~(Blade.x + Blade.y + Blade.z + Blade.w)
-        (0.5 * Blade.x + 0.5 * Blade.y + 0.5 * Blade.z + 0.5 * Blade.w)
-        >>> round(~(Blade.x + Blade.y), 3)
-        (0.707 * Blade.x + 0.707 * Blade.y)
+        >>> from multivectors import x, y, z, w
+        >>> +(x + y + z + w)
+        (0.5 * x + 0.5 * y + 0.5 * z + 0.5 * w)
+        >>> round((x + y).normalize(), 3)
+        (0.707 * x + 0.707 * y)
 
         ```
         """
         return self / abs(self)
 
-    normalize = __invert__
+    normalize = __pos__
+
+    def __abs__(self) -> Scalar_a:
+        """The magnitude of a multivector is the square root of
+        the sum of the squares of its terms.
+
+        ```python
+        >>> from multivectors import x, y, z, w
+        >>> abs(x + y + z + w)
+        2.0
+        >>> (2 ** 1.5 * x + 2 ** 1.5 * y).magnitude()
+        4.0
+
+        ```
+        """
+        return Scalar_f(sum((t * t)._ for t in self.terms)) ** Scalar_f('0.5')
+
+    magnitude = __abs__
+
+    def __invert__(self) -> MultiVector:
+        """The conjugate of a multivector is the negation of all terms
+        besides the real component.
+
+        ```python
+        >>> from multivectors import x, y
+        >>> ~(1 + 2*x + 3*x*y)
+        (1.0 + -2.0 * x + -3.0 * x*y)
+        >>> (2 + 3*y).conjugate()
+        (2.0 + -3.0 * y)
+
+        ```
+        """
+        return MultiVector({
+            bases: (-scalar if bases else scalar)
+            for bases, scalar in self.termdict.items()})
+
+    conjugate = __invert__
+
+    def __complex__(self) -> complex:
+        """Convert a scalar to a complex number.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> complex(2 * _)
+        (2+0j)
+        >>> complex(3 * x)
+        Traceback (most recent call last):
+            ...
+        TypeError: cannot convert non-scalar blade (3.0 * x) to complex
+
+        ```
+        """
+        if self.grade != 0:
+            raise TypeError(
+                'cannot convert non-scalar blade %r to complex' % self)
+        return complex(self._)
+
+    def __int__(self) -> int:
+        """Convert a scalar to an integer.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> int(2 * _)
+        2
+        >>> int(3 * x)
+        Traceback (most recent call last):
+            ...
+        TypeError: cannot convert non-scalar blade (3.0 * x) to int
+
+        ```
+        """
+        if self.grade != 0:
+            raise TypeError(
+                'cannot convert non-scalar blade %r to int' % self)
+        return int(self._)
+
+    def __float__(self) -> float:
+        """Convert a scalar to a float.
+
+        ```python
+        >>> from multivectors import _, x
+        >>> float(2 * _)
+        2.0
+        >>> float(3 * x)
+        Traceback (most recent call last):
+            ...
+        TypeError: cannot convert non-scalar blade (3.0 * x) to float
+
+        ```
+        """
+        if self.grade != 0:
+            raise TypeError(
+                'cannot convert non-scalar blade %r to float' % self)
+        return float(self._)
 
     def __round__(self, ndigits: int = None) -> MultiVector:
         """Round the scalars of each component term of a multivector.
 
         ```python
-        >>> round(1.7 * Blade.x + 1.2 * Blade.y)
-        (2.0 * Blade.x + 1.0 * Blade.y)
-        >>> round(0.15 * Blade.x + 0.05 * Blade.y, 1)
-        (0.1 * Blade.x + 0.1 * Blade.y)
+        >>> from multivectors import x, y
+        >>> round(1.7 * x + 1.2 * y)
+        (2.0 * x + 1.0 * y)
+        >>> round(0.15 * x + 0.05 * y, 1)
+        (0.1 * x + 0.1 * y)
 
         ```
         """
-        return MultiVector.from_terms(*(round(t, ndigits) for t in self.terms))
+        return MultiVector({b: round(s, ndigits)
+                            for b, s in self.termdict.items()})
 
     def __trunc__(self) -> MultiVector:
         """Truncate the scalars of each component term of a multivector.
 
         ```python
         >>> import math
-        >>> math.trunc(1.7 * Blade.x + 1.2 * Blade.y)
-        (1.0 * Blade.x + 1.0 * Blade.y)
-        >>> math.trunc(-1.7 * Blade.x - 1.2 * Blade.y)
-        (-1.0 * Blade.x + -1.0 * Blade.y)
+        >>> from multivectors import x, y
+        >>> math.trunc(1.7 * x + 1.2 * y)
+        (1.0 * x + 1.0 * y)
+        >>> math.trunc(-1.7 * x - 1.2 * y)
+        (-1.0 * x + -1.0 * y)
 
         ```
         """
-        return MultiVector.from_terms(*(math.trunc(t) for t in self.terms))
+        return MultiVector({b: math.trunc(s)
+                            for b, s in self.termdict.items()})
 
     def __floor__(self) -> MultiVector:
         """Floor the scalars of each component term of a multivector.
 
         ```python
         >>> import math
-        >>> math.floor(1.7 * Blade.x + 1.2 * Blade.y)
-        (1.0 * Blade.x + 1.0 * Blade.y)
-        >>> math.floor(-1.7 * Blade.x - 1.2 * Blade.y)
-        (-2.0 * Blade.x + -2.0 * Blade.y)
+        >>> from multivectors import x, y
+        >>> math.floor(1.7 * x + 1.2 * y)
+        (1.0 * x + 1.0 * y)
+        >>> math.floor(-1.7 * x - 1.2 * y)
+        (-2.0 * x + -2.0 * y)
 
         ```
         """
-        return MultiVector.from_terms(*(math.floor(t) for t in self.terms))
+        return MultiVector({b: math.floor(s)
+                            for b, s in self.termdict.items()})
 
     def __ceil__(self) -> MultiVector:
         """Ceiling the scalars of each component term of a multivector.
 
         ```python
         >>> import math
-        >>> math.ceil(1.7 * Blade.x + 1.2 * Blade.y)
-        (2.0 * Blade.x + 2.0 * Blade.y)
-        >>> math.ceil(-1.7 * Blade.x - 1.2 * Blade.y)
-        (-1.0 * Blade.x + -1.0 * Blade.y)
+        >>> from multivectors import x, y
+        >>> math.ceil(1.7 * x + 1.2 * y)
+        (2.0 * x + 2.0 * y)
+        >>> math.ceil(-1.7 * x - 1.2 * y)
+        (-1.0 * x + -1.0 * y)
 
         ```
         """
-        return MultiVector.from_terms(*(math.ceil(t) for t in self.terms))
+        return MultiVector({b: math.ceil(s)
+                            for b, s in self.termdict.items()})
 
     # Actual methods
 
-    def rotate(self, angle: Real, plane: Blade) -> MultiVector:
+    def rotate(self, angle: Scalar_a, plane: MultiVector) -> MultiVector:
         """Rotate this multivector by angle in rads around the blade plane.
 
         angle: Angle to rotate by, in radians.
@@ -1477,43 +1039,78 @@ class MultiVector:
 
         ```python
         >>> from math import radians
-        >>> round((3 * Blade.x + 2 * Blade.y + 4 * Blade.z).rotate(
-        ...     radians(90), Blade.xy), 2)
-        (-2.0 * Blade.x + 3.0 * Blade.y + 4.0 * Blade.z)
-        >>> round((3 * Blade.x + 2 * Blade.y + 4 * Blade.z + 5 * Blade.w)
-        ...     .rotate(radians(90), Blade.xyz), 2)
-        (3.0 * Blade.x + 2.0 * Blade.y + 4.0 * Blade.z + -5.0 * Blade.xyzw)
+        >>> from multivectors import x, y, z, w
+        >>> round((3*x + 2*y + 4*z).rotate(
+        ...     radians(90), x*y), 2)
+        (-2.0 * x + 3.0 * y + 4.0 * z)
+        >>> round((3*x + 2*y + 4*z + 5*w).rotate(
+        ...     radians(90), x*y*z), 2)
+        (3.0 * x + 2.0 * y + 4.0 * z + -5.0 * x*y*z*w)
 
         ```
         """
-        power = plane * angle / 2
-        return (math.e ** (-power)) * self * (math.e ** power)
+        if plane.grade is None or abs(plane * plane) != 1:
+            raise TypeError('%s is not a basis plane' % plane)
+        R = math.e ** (plane * angle / 2)
+        return ~R * self * R
 
-    def angle_to(self, other: MultiVector) -> Real:
+    def angle_to(self, other: MultiVector) -> Scalar_a:
         """Get the angle between this multivector and another.
-        NOTE: Only works for multivectors of singular grade 1!
 
         ```python
         >>> from math import degrees
-        >>> math.degrees((Blade.x + Blade.y).angle_to(Blade.x - Blade.y))
+        >>> from multivectors import x, y, z, w
+        >>> math.degrees((x + y).angle_to(x - y))
         90.0
-        >>> round(math.degrees((Blade.x + Blade.y + Blade.z + Blade.w).angle_to(
-        ...     Blade.x - Blade.y - Blade.z - Blade.w)), 2)
+        >>> round(math.degrees((x + y + z + w).angle_to(x - y - z - w)), 2)
         120.0
 
         ```
         """
         return math.acos((self @ other) / (abs(self) * abs(other)))
 
-Simple = Union[Real, Blade]
-_Simple = Real, Blade
-MV = Union[Blade, MultiVector]
-MVV = Union[Real, Blade, MultiVector]
-_MVV = Real, Blade, MultiVector
-Index = Union[int, Tuple[int, ...], slice]
+Index = Union[int, Iterable[int], slice]
+Scalar_a = Real # annotation
+Scalar_t = Real # isinstance()d type
+Scalar_f = float # factory
+TermDict = Dict[Tuple[int, ...], Scalar_a]
+SOV = Union[Scalar_a, MultiVector]
 
-def __getattr__(name: str) -> Blade:
+_blades: Dict[str, MultiVector] = {}
+
+def __getattr__(name: str) -> MultiVector:
     """Support module level swizzling of basis vectors.
     Unlike Blade.__getattr__, this rejects invalid characters in the name.
     """
-    return Blade(*names_to_idxs(name, True))
+    return _blades.setdefault(name, MultiVector(
+        {tuple(names_to_idxs(name, True)): Scalar_f('1')}))
+
+def set_scalar_factory(
+    instancecheck: Union[Type, Tuple[Type, ...]],
+    factory: Type,
+    annotation: Type = None,
+):
+    """Set the factory for scalars.
+
+    This could be e.g. Decimal for fixed-precision scalars,
+    or Fraction for rational scalars. The default factory is `float`.
+
+    annotation: Function and variable annotations use this.
+    instancecheck: Used in isinstance(), may be type or tuple of types.
+        Should include `numbers.Real` if you want to preserve arithmetic
+        with literals like `2 * x`.
+    factory: See below.
+
+    The `factory` provided must be a constructor that implements the following:
+    - `factory()` = the 0 value of the class
+    - `factory(f: float)` = the float value converted to the class
+    - `factory(s: str)` = the string value parsed to the class
+
+    This will not update any existing multivectors (including module-getattred
+    ones) so make sure to re-get them after calling this function!
+    """
+    global Scalar_a, Scalar_f, Scalar_t
+    Scalar_a = annotation or Union[instancecheck]
+    Scalar_f = factory
+    Scalar_t = instancecheck
+    _blades.clear()

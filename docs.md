@@ -6,8 +6,9 @@ Welcome to MultiVectors documentation!
   - [The choose operator, inner (dot) and outer (wedge) products](#the-choose-operator-inner-dot-and-outer-wedge-products)
   - [Euler's formula applied to multivectors](#eulers-formula-applied-to-multivectors)
 - [Applied](#applied)
-  - [Blade](#blade)
+  - [Blades](#blades)
   - [MultiVector](#multivector)
+  - [Scalar factory](#scalar-factory)
 
 ## Concepts
 Here are some concepts to bear in mind. This is a *very* brief introduction to geometric algebra; a longer one is [here](https://www.youtube.com/watch?v=60z_hpEAtD8).
@@ -52,26 +53,45 @@ Here are some concepts to bear in mind. This is a *very* brief introduction to g
 ## Applied
 All of the above concepts are applied in this library.
 
-### Blade
-* `multivectors.Blade(*bases, scalar=a)` represents a blade with **0-indexed bases** `bases` multiplied by a real scalar `a`. For example, `Blade(0, 1, 3)` represents the basis volume *x̂ŷŵ*, with 0 meaning *x̂*.
-* Basis names can be *swizzled* on the `Blade` class itself: the above could have been done with `Blade.xyw`. For basis vectors beyond *ŵ*, use *ê*ₙ: `Blade.e1e3e4e5` is a basis 4-vector in 5D space. `Blade._` is a 0-blade: a scalar, but with `Blade` type.
-* Basis indices can also be used: `Blade[:4]` = `Blade[0, 1, 2, 3]` = `Blade(0, 1, 2, 3)` = `Blade.xyzw`
-* To take it one step further, basis names can be swizzled on the module itself: `multivector.xyz` returns `multivectors.Blade.xyz`. This also works when importing: `from multivectors import x, y, z, xy, xz, yz` will work just fine.
+### Blades
+* `multivectors.x`, `y`, `z`, `w` represent the first four basis vectors. Bases past 4D use *ê*ₙ syntax: `multivectors.e5` is the 5th basis vector.
+* Basis names can be *swizzled* on the module:
+```python
+>>> from multivectors import x, y, z, xyz
+>>> x * y * z == xyz
+True
+
+```
+* `multivectors._` is a 0-blade: a scalar, but with `MultiVector` type. It is differentiated by normal scalars when `repr()`ed by surrounding parentheses:
+```python
+>>> from multivectors import _
+>>> 2 * _
+(2.0)
+
+```
 * The rules of arithmetic with blades as described above apply:
 ```python
 >>> from multivectors import x, y, z
 >>> x * 2 + x * 3
-5.0 * Blade.x
+(5.0 * x)
 >>> x * 5 * y
-5.0 * Blade.xy
+(5.0 * x*y)
 >>> (x * y) * z == x * (y * z)
 True
 
 ```
-* You can query the grade of a blade: `Blade.xy.grade` is 2.
+* You can query the grade of a blade (only if it is an actual blade!):
+```python
+>>> from multivectors import xy, yzw
+>>> xy.grade
+2
+>>> (2 * yzw).grade
+3
+
+```
 
 ### MultiVector
-* `multivectors.MultiVector.from_terms(*terms)` represents a **sum of `terms`**. You normally should not be constructing this class; it is created from summation involving `Blade`s.
+* A multivector is a sum of zero or more blades. All scalars and blades are multivectors, but not all multivectors are scalars or blades.
 * Basis names can be swizzled on class **instances** to get the coefficient of that basis:
 ```python
 >>> from multivectors import x, y
@@ -82,7 +102,7 @@ True
 * Basis indices can also be used:
 ```python
 >>> from multivectors import xy, yz
->>> (xy + 2*yz)[0, 1]
+>>> (xy + 2*yz) % (0, 1)
 1.0
 
 ```
@@ -90,23 +110,39 @@ True
 ```python
 >>> from multivectors import x, y, xy, yz
 >>> V = 1 + 2*x + 3*y + 4*xy + 5*yz
->>> V % 0
-1.0
->>> V % 1
-(2.0 * Blade.x + 3.0 * Blade.y)
->>> V % 2
-(4.0 * Blade.xy + 5.0 * Blade.yz)
+>>> V[0]
+(1.0)
+>>> V[1]
+(2.0 * x + 3.0 * y)
+>>> V[2]
+(4.0 * x*y + 5.0 * y*z)
+
+```
+* Getting the grade of a multivector will only work if if the multivector is a blade. Otherwise, you get `None`:
+```python
+>>> from multivectors import w, xy, yz
+>>> w.grade
+1
+>>> xy.grade
+2
+>>> yz.grade
+2
+>>> (w + xy).grade
+>>> # returns None
+>>> (xy + yz).grade
+>>> # even multivectors consisting of blades with the same grade don't work
+>>> # the multivector must be an actual blade, with only one basis sequence
 
 ```
 * The rules of arithmetic with multivectors as described above apply:
 ```python
 >>> from multivectors import x, y, z
 >>> x * (y + z)
-(1.0 * Blade.xy + 1.0 * Blade.xz)
+(1.0 * x*y + 1.0 * x*z)
 >>> (y + z) * (2 * x)
-(-2.0 * Blade.xy + -2.0 * Blade.xz)
+(-2.0 * x*y + -2.0 * x*z)
 >>> (1*x + 2*y) * (3*x + 4*y)
-(11.0 + -2.0 * Blade.xy)
+(11.0 + -2.0 * x*y)
 
 ```
 * The extra products apply too:
@@ -115,11 +151,11 @@ True
 >>> 1*3 + 2*4
 11
 >>> (1*x + 2*y) @ (3*x + 4*y)
-11.0
+(11.0)
 >>> (1*5 - 2*4, 1*6 - 3*4, 2*6 - 3*5)
 (-3, -6, -3)
 >>> (1*x + 2*y + 3*z) ^ (4*x + 5*y + 6*z)
-(-3.0 * Blade.xy + -6.0 * Blade.xz + -3.0 * Blade.yz)
+(-3.0 * x*y + -6.0 * x*z + -3.0 * y*z)
 
 ```
 * A convenience method is provided to rotate multivectors:
@@ -127,6 +163,40 @@ True
 >>> from math import radians
 >>> from multivectors import x, y, z, xz
 >>> round((3*x + 2*y + 4*z).rotate(radians(90), xz), 2)
-(-4.0 * Blade.x + 2.0 * Blade.y + 3.0 * Blade.z)
+(-4.0 * x + 2.0 * y + 3.0 * z)
 
 ```
+
+### Scalar factory
+You can set a scalar factory to control the type of number used for scalars. This can be, for example:
+* [`decimal.Decimal`](https://docs.python.org/3/library/decimal.html) to get arbitrary decimal precision in multivectors
+* [`fractions.Fraction`](https://docs.python.org/3/library/fractions.html) to limit calculations to rationals
+* A class of your own, to control other aspects of scalar arithmetic
+
+You will need at least two things:
+* `instancecheck`: The class object(s) to limit arithmetic to.
+  * This can be a tuple of classes, and should include [`numbers.Real`](https://docs.python.org/3/library/numbers.html#numbers.Real) if you want to retain regular literal arithmetic. If you only include the custom class, things like `2 * x` will fail because `int` is not a subclass of your class.
+* `factory`: The factory function that creates instances of your class. This can just be the class object again, but note that the function/constructor must implement the following:
+  * `factory()` returns the 0 value of the class. This is used in defaults.
+  * `factory(f)` where `f` is a `float` value. This is used to cast floats to the class.
+  * `factory(s)` where `s` is a `str` value. This is used for non-zero constants like `factory('1')`.
+* Optionally, `annotation`: The annotation used in type hinting.
+
+You must call `multivectors.set_scalar_factory()` **before importing anything else, including swizzled names**:
+```python
+>>> from decimal import Decimal
+>>> from numbers import Real
+>>> from multivectors import set_scalar_factory
+>>> set_scalar_factory((Decimal, Real), Decimal)
+>>> from multivectors import x, y
+>>> x + y
+(Decimal('1') * x + Decimal('1') * y)
+
+```
+<div style="display: none">
+Resetting scalar factory for doctest:
+```python
+>>> set_scalar_factory(Real, float, float)
+
+```
+</div>
