@@ -1147,7 +1147,12 @@ def set_scalar_factory(
     ones) so make sure to re-get them after calling this function!
     """
     global Scalar_a, Scalar_f, Scalar_t
-    Scalar_a = annotation or Union[instancecheck]
+    if isinstance(instancecheck, tuple):
+        # this hacks around Union statically requiring two or more arguments
+        a_default = Union[(instancecheck[0], *instancecheck[1:])]
+    else:
+        a_default = instancecheck
+    Scalar_a = annotation or a_default
     Scalar_f = factory
     Scalar_t = instancecheck
     _blades.clear()
