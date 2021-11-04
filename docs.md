@@ -195,10 +195,3 @@ You must call `multivectors.set_scalar_factory()` **before importing anything el
 (Decimal('1') * x + Decimal('1') * y)
 
 ```
-<div style="display: none">
-Resetting scalar factory for doctest:
-```python
->>> set_scalar_factory(Real, float, float)
-
-```
-</div>
