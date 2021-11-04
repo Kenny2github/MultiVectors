@@ -25,7 +25,6 @@ from numbers import Real
 from typing import Dict, Iterable, List, Tuple, Type, Union
 
 __all__ = [
-    'Blade',
     'MultiVector',
     '_',
     'x',
