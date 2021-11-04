@@ -304,6 +304,22 @@ class MultiVector:
         d = {b: s for b, s in d.items() if s != Scalar_f()} # discard zeroes
         return cls(d)
 
+    @classmethod
+    def scalar(cls, scalar_string: str) -> MultiVector:
+        """Create a MultiVector representing a scalar.
+        The scalar will be created using the scalar factory.
+
+        ```python
+        >>> from multivectors import MultiVector
+        >>> MultiVector.scalar('0')
+        (0.0)
+        >>> MultiVector.scalar('1.2')
+        (1.2)
+
+        ```
+        """
+        return cls({(): Scalar_f(scalar_string)})
+
     def __getattr__(self, name: str) -> Scalar_a:
         """Support basis name swizzling."""
         return self.termdict.get(tuple(names_to_idxs(name)), Scalar_f())
@@ -757,7 +773,7 @@ class MultiVector:
         """
         if not isinstance(other, int):
             return NotImplemented
-        result = MultiVector({(): Scalar_f('1')})
+        result = self.scalar('1')
         for _ in range(abs(other)):
             result *= self
         if other < 0:
