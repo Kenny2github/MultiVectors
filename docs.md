@@ -48,6 +48,8 @@ Here are some concepts to bear in mind. This is a *very* brief introduction to g
 
 ### Euler's formula applied to multivectors
 * *e* to the power (*θB*) = cos(*θ*) + *B* sin(*θ*) where θ is a scalar in radians and *B* is a basis multivector.
+  * **Note**: This formula only works when *B*² = -1 (in the same way as the imaginary unit *i*).
+  * For purposes of interest, the more general formula for *e* raised to a multivector power is the Taylor series:<br/>![Taylor series of exp(V)](https://cdn.discordapp.com/attachments/417244106876780544/905703412488896522/unknown.png)
 * For reasons that are beyond my power to explain, the rotation of a multivector *V* by *θ* through the plane *B* is e\*\*(-*θB*/2) * V * e\*\*(*θB*/2)
 
 ## Applied

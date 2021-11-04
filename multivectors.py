@@ -782,28 +782,49 @@ class MultiVector:
 
     def __rpow__(self, other: Scalar_a) -> MultiVector:
         """A real number raised to a multivector power.
-        x ** V = Product of x ** V_i = Product of e ** (V_i ln x)
-        = Product of (cos(a_i ln x) + sin(a_i ln x) * Ii)
+        x ** V = e ** ln(x ** V) = e ** (V ln x)
 
         ```python
-        >>> from math import e, pi
         >>> from multivectors import x, y
-        >>> round(e ** (pi/4 * (x + y)), 2)
-        (0.5 + 0.5 * x + 0.5 * y + 0.5 * x*y)
-        >>> round(e ** (pi * (x + y)), 2)
-        (1.0)
+        >>> round(2 ** (x + y), 2)
+        (1.52 + 0.81 * x + 0.81 * y)
 
         ```
         """
         if not isinstance(other, Scalar_t):
             return NotImplemented
-        result = MultiVector({(): Scalar_f('1')})
-        for t in self.terms:
-            ((bases, scalar),) = t.termdict.items()
-            theta = scalar * Scalar_f(math.log(other))
-            result *= Scalar_f(math.cos(theta)) + MultiVector({
-                bases: Scalar_f(math.sin(theta))})
-        return result
+        return (self * math.log(other)).exp()
+
+    def exp(self) -> MultiVector:
+        """e raised to this multivector power.
+        e ** V = Sum of V^i / i!
+
+        ```python
+        >>> from math import pi, sqrt
+        >>> from multivectors import x, y
+        >>> # 45-degree rotation through xy-plane
+        >>> # results in (1+xy)/sqrt(2)
+        >>> (pi/4 * x*y).exp() * sqrt(2)
+        (1.0 + 1.0 * x*y)
+        >>> round((pi * x*y).exp(), 14)
+        (-1.0)
+
+        ```
+        """
+        # since we have to sequentially sum terms anyway, we might
+        # as well repeatedly multiply for the integer exponent
+        # and sequentially multiply for the factorial
+        i = current_factorial = 1
+        result = self.scalar('1')
+        current_exponent = self.scalar('1')
+        last_result = self.scalar('0')
+        while last_result != result:
+            last_result = result
+            current_exponent *= self
+            current_factorial *= i
+            i += 1
+            result += current_exponent / current_factorial
+        return last_result
 
     def __xor__(self, other: SOV) -> MultiVector:
         """Get the outer (wedge) product of two objects.
@@ -1067,7 +1088,7 @@ class MultiVector:
         """
         if plane.grade is None or abs(plane * plane) != 1:
             raise TypeError('%s is not a basis plane' % plane)
-        R = math.e ** (plane * angle / 2)
+        R = (plane * angle / 2).exp()
         return ~R * self * R
 
     def angle_to(self, other: MultiVector) -> Scalar_a:
