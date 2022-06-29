@@ -8,7 +8,6 @@ Welcome to MultiVectors documentation!
 - [Applied](#applied)
   - [Blades](#blades)
   - [MultiVector](#multivector)
-  - [Scalar factory](#scalar-factory)
 
 ## Concepts
 Here are some concepts to bear in mind. This is a *very* brief introduction to geometric algebra; a longer one is [here](https://www.youtube.com/watch?v=60z_hpEAtD8).
@@ -166,32 +165,5 @@ True
 >>> from multivectors import x, y, z, xz
 >>> round((3*x + 2*y + 4*z).rotate(radians(90), xz), 2)
 (-4.0 * x + 2.0 * y + 3.0 * z)
-
-```
-
-### Scalar factory
-You can set a scalar factory to control the type of number used for scalars. This can be, for example:
-* [`decimal.Decimal`](https://docs.python.org/3/library/decimal.html) to get arbitrary decimal precision in multivectors
-* [`fractions.Fraction`](https://docs.python.org/3/library/fractions.html) to limit calculations to rationals
-* A class of your own, to control other aspects of scalar arithmetic
-
-You will need at least two things:
-* `instancecheck`: The class object(s) to limit arithmetic to.
-  * This can be a tuple of classes, and should include [`numbers.Real`](https://docs.python.org/3/library/numbers.html#numbers.Real) if you want to retain regular literal arithmetic. If you only include the custom class, things like `2 * x` will fail because `int` is not a subclass of your class.
-* `factory`: The factory function that creates instances of your class. This can just be the class object again, but note that the function/constructor must implement the following:
-  * `factory()` returns the 0 value of the class. This is used in defaults.
-  * `factory(f)` where `f` is a `float` value. This is used to cast floats to the class.
-  * `factory(s)` where `s` is a `str` value. This is used for non-zero constants like `factory('1')`.
-* Optionally, `annotation`: The annotation used in type hinting.
-
-You must call `multivectors.set_scalar_factory()` **before importing anything else, including swizzled names**:
-```python
->>> from decimal import Decimal
->>> from numbers import Real
->>> from multivectors import set_scalar_factory
->>> set_scalar_factory((Decimal, Real), Decimal)
->>> from multivectors import x, y
->>> x + y
-(Decimal('1') * x + Decimal('1') * y)
 
 ```
