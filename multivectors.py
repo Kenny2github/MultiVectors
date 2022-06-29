@@ -22,7 +22,7 @@ For more see [the docs](https://github.com/Kenny2github/MultiVectors/blob/main/d
 from __future__ import annotations
 import math
 from numbers import Real
-from typing import Dict, Iterable, List, Tuple, Type, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 __all__ = [
     'MultiVector',
@@ -74,14 +74,15 @@ def count_swaps(arr: List[int], copy: bool = True) -> int:
         arr = list(arr)
     if len(arr) < 2:
         return 0
-    m = (len(arr) + 1) // 2
-    left = arr[:m]
-    right = arr[m:]
+    mid = (len(arr) + 1) // 2
+    left = arr[:mid]
+    right = arr[mid:]
     return (count_swaps(left, False)
             + count_swaps(right, False)
             + merge(arr, left, right))
 
-def names_to_idxs(name: str, raise_on_invalid_chars: bool = False) -> List[int]:
+def names_to_idxs(name: str,
+                  raise_on_invalid_chars: bool = False) -> List[int]:
     """Convert swizzled basis vector names into generalized basis indices.
 
     Examples:
@@ -99,34 +100,38 @@ def names_to_idxs(name: str, raise_on_invalid_chars: bool = False) -> List[int]:
         # fail on magic attributes immediately
         raise AttributeError
     idxs: List[int] = []
-    i = 0
-    nl = len(name)
-    while i < nl:
-        c = name[i]
-        if c in NAMES:
-            idxs.append(NAMES.index(c))
-            i += 1
-        elif c == 'e':
-            i += 1
-            j = i
+    index = 0
+    name_len = len(name)
+    while index < name_len:
+        char = name[index]
+        if char in NAMES:
+            idxs.append(NAMES.index(char))
+            index += 1
+        elif char == 'e':
+            index += 1
+            end = index
             subname = []
-            while j < nl and name[j] not in (NAMES + 'e') and not subname:
-                if '0' <= name[j] <= '9':
-                    subname.append(name[j])
+            while (
+                end < name_len
+                and name[end] not in (NAMES + 'e')
+                and not subname
+            ):
+                if '0' <= name[end] <= '9':
+                    subname.append(name[end])
                 elif raise_on_invalid_chars:
                     raise AttributeError
-                j += 1
+                end += 1
             try:
                 idxs.append(int(''.join(subname)) - 1)
             except ValueError:
-                raise AttributeError('empty eN notation: %r' % name) from None
-            i = j
-        elif c == '_':
-            i += 1
+                raise AttributeError(f'empty eN notation: {name!r}') from None
+            index = end
+        elif char == '_':
+            index += 1
         elif raise_on_invalid_chars:
             raise AttributeError
         else:
-            i += 1
+            index += 1
     return idxs
 
 def idxs_to_idxs(idxs: Index) -> List[int]:
@@ -167,11 +172,11 @@ def idxs_to_names(idxs: Index, sep='') -> str:
     """
     idxs = idxs_to_idxs(idxs)
     if max(idxs) > 3:
-        return sep.join(f'e{i+1}' for i in idxs)
-    return sep.join(NAMES[i] for i in idxs)
+        return sep.join(f'e{idx + 1}' for idx in idxs)
+    return sep.join(NAMES[idx] for idx in idxs)
 
-def condense_bases(bases: Tuple[int, ...], scalar: Scalar_a = None) \
-        -> Tuple[Tuple[int, ...], Scalar_a]:
+def condense_bases(bases: Tuple[int, ...], scalar: Optional[float] = None) \
+        -> Tuple[Tuple[int, ...], float]:
     """Normalize a sequence of bases, modifying the scalar as necessary.
 
     bases: The tuple of basis indices.
@@ -190,15 +195,15 @@ def condense_bases(bases: Tuple[int, ...], scalar: Scalar_a = None) \
 
     ```
     """
-    bases = list(bases)
+    _bases = list(bases)
     if scalar is None:
-        scalar = Scalar_f('1')
-    if count_swaps(bases) % 2:
-        scalar *= Scalar_f('-1')
-    bases.sort()
-    bases = [basis for basis in set(bases)
-                for _ in range(bases.count(basis) % 2)]
-    return tuple(bases), scalar
+        scalar = 1.0
+    if count_swaps(_bases) % 2 != 0:
+        scalar *= -1.0
+    _bases.sort()
+    _bases = [basis for basis in set(_bases)
+              if _bases.count(basis) % 2 != 0]
+    return tuple(_bases), scalar
 
 class MultiVector:
     """The sum of one or more blades.
@@ -266,13 +271,14 @@ class MultiVector:
 
         ```
         """
-        items = sorted(self.termdict.items(), key=lambda i: (len(i[0]), i[0]))
+        items = sorted(self.termdict.items(),
+                       key=lambda item: (len(item[0]), item[0]))
         return tuple(MultiVector({key: value}) for key, value in items)
 
     def __init__(self, termdict: TermDict):
-        self.termdict = {b: Scalar_f(s) for b, s in termdict.items()
-                         if s != Scalar_f()}
-        self.termdict = self.termdict or {(): Scalar_f()}
+        self.termdict = {bases: float(scalar)
+                         for bases, scalar in termdict.items()
+                         if scalar != 0.0} or {(): 0.0}
 
     @classmethod
     def from_terms(cls, *terms: SOV) -> MultiVector:
@@ -296,17 +302,19 @@ class MultiVector:
             (term if isinstance(term, MultiVector)
              else MultiVector({(): term})).termdict.items()
         ]
-        termdict: Dict[Tuple[int, ...], List[Scalar_a]] = {}
+        termsdict: Dict[Tuple[int, ...], List[float]] = {}
         for bases, scalar in termseq:
-            termdict.setdefault(bases, []).append(scalar)
-        d = {b: Scalar_f(sum(s)) for b, s in termdict.items()}
-        d = {b: s for b, s in d.items() if s != Scalar_f()} # discard zeroes
-        return cls(d)
+            termsdict.setdefault(bases, []).append(scalar)
+        termdict = {bases: math.fsum(scalars)
+                    for bases, scalars in termsdict.items()}
+        # discard zeros
+        termdict = {bases: scalar for bases, scalar in termdict.items()
+                    if scalar != 0.0}
+        return cls(termdict)
 
     @classmethod
-    def scalar(cls, scalar_string: str) -> MultiVector:
+    def scalar(cls, num: float) -> MultiVector:
         """Create a MultiVector representing a scalar.
-        The scalar will be created using the scalar factory.
 
         ```python
         >>> from multivectors import MultiVector
@@ -317,11 +325,11 @@ class MultiVector:
 
         ```
         """
-        return cls({(): Scalar_f(scalar_string)})
+        return cls({(): float(num)})
 
-    def __getattr__(self, name: str) -> Scalar_a:
+    def __getattr__(self, name: str) -> float:
         """Support basis name swizzling."""
-        return self.termdict.get(tuple(names_to_idxs(name)), Scalar_f())
+        return self.termdict.get(tuple(names_to_idxs(name)), 0.0)
 
     def __getitem__(self, grades: Index) -> MultiVector:
         """The choose operator - returns the sum of all blades of grade k.
@@ -365,9 +373,11 @@ class MultiVector:
         if self.grade is not None:
             ((bases, scalar),) = self.termdict.items()
             if bases == ():
-                return '(%r)' % scalar
-            return '(%r * %s)' % (scalar, idxs_to_names(bases, '*'))
-        return '(' + ' + '.join(repr(t).strip('()') for t in self.terms) + ')'
+                return f'({scalar!r})'
+            names = idxs_to_names(bases, '*')
+            return f'({scalar!r} * {names!s})'
+        return '(' + ' + '.join(repr(term).strip('()')
+                                for term in self.terms) + ')'
 
     def __str__(self) -> str:
         """Return a representation of this multivector suited for showing.
@@ -385,7 +395,8 @@ class MultiVector:
             ((bases, scalar),) = self.termdict.items()
             if bases == ():
                 return str(scalar)
-            return '%.2f%s' % (scalar, idxs_to_names(bases))
+            names = idxs_to_names(bases)
+            return f'{scalar:.2f}{names!s}'
         return '(' + ' + '.join(map(str, self.terms)) + ')'
 
     # Relational operators
@@ -430,7 +441,7 @@ class MultiVector:
         """
         return not (self == other)
 
-    def __lt__(self, other: Scalar_a) -> bool:
+    def __lt__(self, other: float) -> bool:
         """Compare this blade less than an object.
 
         Returns: True if this is a scalar blade less than the scalar.
@@ -450,11 +461,11 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t) or self.grade != 0:
+        if not isinstance(other, Real) or self.grade != 0:
             return NotImplemented
         return self._ < other
 
-    def __gt__(self, other: Scalar_a) -> bool:
+    def __gt__(self, other: float) -> bool:
         """Compare this blade greater than an object.
 
         Returns: True if this is a scalar blade greater than the scalar.
@@ -474,11 +485,11 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t) or self.grade != 0:
+        if not isinstance(other, Real) or self.grade != 0:
             return NotImplemented
         return self._ > other
 
-    def __le__(self, other: Scalar_a) -> bool:
+    def __le__(self, other: float) -> bool:
         """Compare this blade less than or equal to an object.
 
         Returns: True if this is a scalar blade not greater than the scalar.
@@ -500,11 +511,11 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t) or self.grade != 0:
+        if not isinstance(other, Real) or self.grade != 0:
             return NotImplemented
         return self._ <= other
 
-    def __ge__(self, other: Scalar_a) -> bool:
+    def __ge__(self, other: float) -> bool:
         """Compare this blade greater than or equal to an object.
 
         Returns: True if this is a scalar blade not less than the scalar.
@@ -526,7 +537,7 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t) or self.grade != 0:
+        if not isinstance(other, Real) or self.grade != 0:
             return NotImplemented
         return self._ >= other
 
@@ -549,11 +560,11 @@ class MultiVector:
         """
         if isinstance(other, MultiVector):
             return self.from_terms(*self.terms, *other.terms)
-        if isinstance(other, Scalar_t):
+        if isinstance(other, Real):
             return self.from_terms(*self.terms, other)
         return NotImplemented
 
-    def __radd__(self, other: Scalar_a) -> MultiVector:
+    def __radd__(self, other: float) -> MultiVector:
         """Support adding multivectors on the right side of objects.
 
         ```python
@@ -567,7 +578,7 @@ class MultiVector:
         """
         if isinstance(other, MultiVector):
             return self.from_terms(*other.terms, *self.terms)
-        if isinstance(other, Scalar_t):
+        if isinstance(other, Real):
             return self.from_terms(other, *self.terms)
         return NotImplemented
 
@@ -585,7 +596,7 @@ class MultiVector:
         """
         return self + (-other)
 
-    def __rsub__(self, other: Scalar_a) -> MultiVector:
+    def __rsub__(self, other: float) -> MultiVector:
         """Support subtracting multivectors from objects.
 
         ```python
@@ -625,11 +636,12 @@ class MultiVector:
                 return MultiVector({bases: scalar})
             return self.from_terms(*(a * b for b in other.terms
                                      for a in self.terms))
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(t * self.from_terms(other) for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(term * self.from_terms(other)
+                                     for term in self.terms))
         return NotImplemented
 
-    def __rmul__(self, other: Scalar_a) -> MultiVector:
+    def __rmul__(self, other: float) -> MultiVector:
         """Support multiplying multivectors on the right side of scalars.
 
         ```python
@@ -641,9 +653,9 @@ class MultiVector:
 
         ```
         """
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(self.from_terms(other) * t
-                                     for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(self.from_terms(other) * term
+                                     for term in self.terms))
         return NotImplemented
 
     def __matmul__(self, other: SOV) -> MultiVector:
@@ -671,14 +683,14 @@ class MultiVector:
                 return (self * other)[abs(self.grade - other.grade)]
             return self.from_terms(*(
                 a @ b for b in other.terms for a in self.terms))
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(t @ self.from_terms(other)
-                                     for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(term @ self.from_terms(other)
+                                     for term in self.terms))
         return NotImplemented
 
     dot = inner = __matmul__
 
-    def __rmatmul__(self, other: Scalar_a) -> MultiVector:
+    def __rmatmul__(self, other: float) -> MultiVector:
         """Support dotting multivectors on the right hand side.
 
         Returns: v@(a+b) = v@a + v@b for multivector (a+b) and scalar v
@@ -692,9 +704,9 @@ class MultiVector:
 
         ```
         """
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(self.from_terms(other) @ t
-                                     for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(self.from_terms(other) @ term
+                                     for term in self.terms))
         return NotImplemented
 
     def __truediv__(self, other: SOV) -> MultiVector:
@@ -711,15 +723,15 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t):
+        if not isinstance(other, Real):
             if not isinstance(other, MultiVector):
                 return NotImplemented
             if other.grade is None:
                 return NotImplemented
         other = 1 / other
-        return MultiVector.from_terms(*(t * other for t in self.terms))
+        return MultiVector.from_terms(*(term * other for term in self.terms))
 
-    def __rtruediv__(self, other: Scalar_a) -> MultiVector:
+    def __rtruediv__(self, other: float) -> MultiVector:
         """Divide a scalar by a multivector. Only defined for blades.
 
         ```python
@@ -736,7 +748,7 @@ class MultiVector:
                             'with more than one term')
         return other * self / (self * self)._
 
-    def __mod__(self, idxs: Index) -> Scalar_a:
+    def __mod__(self, idxs: Index) -> float:
         """Support index swizzling.
 
         ```python
@@ -755,7 +767,7 @@ class MultiVector:
 
         ```
         """
-        return self.termdict.get(tuple(idxs_to_idxs(idxs)), Scalar_f())
+        return self.termdict.get(tuple(idxs_to_idxs(idxs)), 0.0)
 
     def __pow__(self, other: int) -> MultiVector:
         """A multivector raised to an integer power.
@@ -772,14 +784,14 @@ class MultiVector:
         """
         if not isinstance(other, int):
             return NotImplemented
-        result = self.scalar('1')
+        result = self.scalar(1)
         for _ in range(abs(other)):
             result *= self
         if other < 0:
-            return Scalar_f('1') / result
+            return 1.0 / result
         return result
 
-    def __rpow__(self, other: Scalar_a) -> MultiVector:
+    def __rpow__(self, other: float) -> MultiVector:
         """A real number raised to a multivector power.
         x ** V = e ** ln(x ** V) = e ** (V ln x)
 
@@ -790,7 +802,7 @@ class MultiVector:
 
         ```
         """
-        if not isinstance(other, Scalar_t):
+        if not isinstance(other, Real):
             return NotImplemented
         return (self * math.log(other)).exp()
 
@@ -814,9 +826,9 @@ class MultiVector:
         # as well repeatedly multiply for the integer exponent
         # and sequentially multiply for the factorial
         i = current_factorial = 1
-        result = self.scalar('1')
-        current_exponent = self.scalar('1')
-        last_result = self.scalar('0')
+        result = self.scalar(1)
+        current_exponent = self.scalar(1)
+        last_result = self.scalar(0)
         while last_result != result:
             last_result = result
             current_exponent *= self
@@ -853,14 +865,14 @@ class MultiVector:
                 return (self * other)[self.grade + other.grade]
             return self.from_terms(*(
                 a ^ b for b in other.terms for a in self.terms))
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(t ^ self.from_terms(other)
-                                     for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(term ^ self.from_terms(other)
+                                     for term in self.terms))
         return NotImplemented
 
     wedge = outer = __xor__
 
-    def __rxor__(self, other: Scalar_a) -> MultiVector:
+    def __rxor__(self, other: float) -> MultiVector:
         """Support wedging multivectors on the right hand side.
 
         Returns: v@(a+b) = v@a + v@b for multivector (a+b) and simple v
@@ -874,9 +886,9 @@ class MultiVector:
 
         ```
         """
-        if isinstance(other, Scalar_t):
-            return self.from_terms(*(self.from_terms(other) ^ t
-                                     for t in self.terms))
+        if isinstance(other, Real):
+            return self.from_terms(*(self.from_terms(other) ^ term
+                                     for term in self.terms))
         return NotImplemented
 
     # Unary operators
@@ -891,7 +903,8 @@ class MultiVector:
 
         ```
         """
-        return MultiVector({b: -s for b, s in self.termdict.items()})
+        return MultiVector({bases: -scalar for bases, scalar
+                            in self.termdict.items()})
 
     def __pos__(self) -> MultiVector:
         """A normalized multivector is one scaled down by its magnitude.
@@ -909,7 +922,7 @@ class MultiVector:
 
     normalize = __pos__
 
-    def __abs__(self) -> Scalar_a:
+    def __abs__(self) -> float:
         """The magnitude of a multivector is the square root of
         the sum of the squares of its terms.
 
@@ -922,7 +935,7 @@ class MultiVector:
 
         ```
         """
-        return Scalar_f(sum((t * t)._ for t in self.terms)) ** Scalar_f('0.5')
+        return math.fsum((term * term)._ for term in self.terms) ** 0.5
 
     magnitude = __abs__
 
@@ -961,7 +974,7 @@ class MultiVector:
         """
         if self.grade != 0:
             raise TypeError(
-                'cannot convert non-scalar blade %r to complex' % self)
+                f'cannot convert non-scalar blade {self!r} to complex')
         return complex(self._)
 
     def __int__(self) -> int:
@@ -980,7 +993,7 @@ class MultiVector:
         """
         if self.grade != 0:
             raise TypeError(
-                'cannot convert non-scalar blade %r to int' % self)
+                f'cannot convert non-scalar blade {self!r} to int')
         return int(self._)
 
     def __float__(self) -> float:
@@ -999,10 +1012,10 @@ class MultiVector:
         """
         if self.grade != 0:
             raise TypeError(
-                'cannot convert non-scalar blade %r to float' % self)
+                f'cannot convert non-scalar blade {self!r} to float')
         return float(self._)
 
-    def __round__(self, ndigits: int = None) -> MultiVector:
+    def __round__(self, ndigits: Optional[int] = None) -> MultiVector:
         """Round the scalars of each component term of a multivector.
 
         ```python
@@ -1014,8 +1027,8 @@ class MultiVector:
 
         ```
         """
-        return MultiVector({b: round(s, ndigits)
-                            for b, s in self.termdict.items()})
+        return MultiVector({bases: round(scalar, ndigits)
+                            for bases, scalar in self.termdict.items()})
 
     def __trunc__(self) -> MultiVector:
         """Truncate the scalars of each component term of a multivector.
@@ -1030,8 +1043,8 @@ class MultiVector:
 
         ```
         """
-        return MultiVector({b: math.trunc(s)
-                            for b, s in self.termdict.items()})
+        return MultiVector({bases: math.trunc(scalar)
+                            for bases, scalar in self.termdict.items()})
 
     def __floor__(self) -> MultiVector:
         """Floor the scalars of each component term of a multivector.
@@ -1046,8 +1059,8 @@ class MultiVector:
 
         ```
         """
-        return MultiVector({b: math.floor(s)
-                            for b, s in self.termdict.items()})
+        return MultiVector({bases: math.floor(scalar)
+                            for bases, scalar in self.termdict.items()})
 
     def __ceil__(self) -> MultiVector:
         """Ceiling the scalars of each component term of a multivector.
@@ -1062,12 +1075,12 @@ class MultiVector:
 
         ```
         """
-        return MultiVector({b: math.ceil(s)
-                            for b, s in self.termdict.items()})
+        return MultiVector({bases: math.ceil(scalar)
+                            for bases, scalar in self.termdict.items()})
 
     # Actual methods
 
-    def rotate(self, angle: Scalar_a, plane: MultiVector) -> MultiVector:
+    def rotate(self, angle: float, plane: MultiVector) -> MultiVector:
         """Rotate this multivector by angle in rads around the blade plane.
 
         angle: Angle to rotate by, in radians.
@@ -1086,11 +1099,11 @@ class MultiVector:
         ```
         """
         if plane.grade is None or abs(plane * plane) != 1:
-            raise TypeError('%s is not a basis plane' % plane)
+            raise TypeError(f'{plane!s} is not a basis plane')
         R = (plane * angle / 2).exp()
         return ~R * self * R
 
-    def angle_to(self, other: MultiVector) -> Scalar_a:
+    def angle_to(self, other: MultiVector) -> float:
         """Get the angle between this multivector and another.
 
         ```python
@@ -1105,12 +1118,13 @@ class MultiVector:
         """
         return math.acos((self @ other) / (abs(self) * abs(other)))
 
+# type aliases
+
 Index = Union[int, Iterable[int], slice]
-Scalar_a = Real # annotation
-Scalar_t = Real # isinstance()d type
-Scalar_f = float # factory
-TermDict = Dict[Tuple[int, ...], Scalar_a]
-SOV = Union[Scalar_a, MultiVector]
+TermDict = Dict[Tuple[int, ...], float]
+SOV = Union[float, MultiVector]
+
+# module level swizzling
 
 _blades: Dict[str, MultiVector] = {}
 
@@ -1119,42 +1133,7 @@ def __getattr__(name: str) -> MultiVector:
     Unlike Blade.__getattr__, this rejects invalid characters in the name.
     """
     return _blades.setdefault(name, MultiVector(
-        {tuple(names_to_idxs(name, True)): Scalar_f('1')}))
-
-def set_scalar_factory(
-    instancecheck: Union[Type, Tuple[Type, ...]],
-    factory: Type,
-    annotation: Type = None,
-):
-    """Set the factory for scalars.
-
-    This could be e.g. Decimal for fixed-precision scalars,
-    or Fraction for rational scalars. The default factory is `float`.
-
-    annotation: Function and variable annotations use this.
-    instancecheck: Used in isinstance(), may be type or tuple of types.
-        Should include `numbers.Real` if you want to preserve arithmetic
-        with literals like `2 * x`.
-    factory: See below.
-
-    The `factory` provided must be a constructor that implements the following:
-    - `factory()` = the 0 value of the class
-    - `factory(f: float)` = the float value converted to the class
-    - `factory(s: str)` = the string value parsed to the class
-
-    This will not update any existing multivectors (including module-getattred
-    ones) so make sure to re-get them after calling this function!
-    """
-    global Scalar_a, Scalar_f, Scalar_t
-    if isinstance(instancecheck, tuple):
-        # this hacks around Union statically requiring two or more arguments
-        a_default = Union[(instancecheck[0], *instancecheck[1:])]
-    else:
-        a_default = instancecheck
-    Scalar_a = annotation or a_default
-    Scalar_f = factory
-    Scalar_t = instancecheck
-    _blades.clear()
+        {tuple(names_to_idxs(name, True)): 1.0}))
 
 _: MultiVector
 x: MultiVector
