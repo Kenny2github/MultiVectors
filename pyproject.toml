@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multivectors"
+description = "Compute blades and multivectors in arbitrary-dimensional space."
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["multivector", "geometric", "algebra"]
+license = {file = "LICENSE"}
+authors = [{name = "Ken Hilton"}]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.7",
+    "Typing :: Typed"
+]
+dependencies = []
+dynamic = ["version"]
+
+[project.optional-dependencies]
+test = [
+	"pytest",
+]
+
+[project.urls]
+Source = "https://github.com/Kenny2github/MultiVectors"
+
+[tool.setuptools]
+py-modules = ["multivectors"]
+
+[tool.setuptools.dynamic]
+version = {attr = "multivectors.__version__"}
+
+[tool.pytest.ini_options]
+addopts = [
+	"--doctest-modules",
+	"--doctest-glob=*.md"
+]
