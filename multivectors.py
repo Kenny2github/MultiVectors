@@ -209,7 +209,7 @@ def idxs_to_names(idxs: Index, sep: str = '') -> str:
         >>> idxs_to_names(2)
         'z'
         >>> idxs_to_names((0, 2, 3), sep='*')
-        'x*y*w'
+        'x*z*w'
     """
     idxs = idxs_to_idxs(idxs)
     if max(idxs) > 3:
@@ -399,7 +399,7 @@ class MultiVector:
             >>> (1 + 2*x + 3*x*y)[:2]
             (1.0 + 2.0 * x)
             >>> (1 + 2*x + 3*x*y)[1:]
-            (2.0 * x + 4.0 * x*y)
+            (2.0 * x + 3.0 * x*y)
         """
         if isinstance(grades, slice):
             stop = (max(map(len, self.termdict.keys())) + 1) \
@@ -449,7 +449,7 @@ class MultiVector:
         if self.grade is not None:
             ((bases, scalar),) = self.termdict.items()
             if bases == ():
-                return str(scalar)
+                return f'{scalar:.2f}'
             names = idxs_to_names(bases)
             return f'{scalar:.2f}{names!s}'
         return '(' + ' + '.join(map(str, self.terms)) + ')'
