@@ -29,9 +29,6 @@ dynamic = ["version"]
 test = [
 	"pytest",
 ]
-docs = [
-    "sphinx_rtd_theme",
-]
 
 [project.urls]
 Source = "https://github.com/Kenny2github/MultiVectors"
