@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "multivectors"
 description = "Compute blades and multivectors in arbitrary-dimensional space."
-readme = "README.md"
+readme = "README.rst"
 requires-python = ">=3.7"
 keywords = ["multivector", "geometric", "algebra"]
 license = {file = "LICENSE"}
