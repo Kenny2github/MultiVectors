@@ -46,5 +46,5 @@ version = {attr = "multivectors.__version__"}
 [tool.pytest.ini_options]
 addopts = [
 	"--doctest-modules",
-	"--doctest-glob=*.md"
+	"--doctest-glob=*.rst"
 ]
