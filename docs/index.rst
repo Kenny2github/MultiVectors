@@ -12,10 +12,10 @@ Welcome to MultiVectors's documentation!
 
    geometric_algebra
    applied
+   reference
 
 Indices and tables
 ==================
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
