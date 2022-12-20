@@ -419,6 +419,8 @@ class MultiVector:
         Examples:
 
             >>> from multivectors import x, y, z, w
+            >>> repr(x)
+            '(1.0 * x)'
             >>> repr(x + y)
             '(1.0 * x + 1.0 * y)'
             >>> repr(y*z - x*w)
@@ -439,6 +441,8 @@ class MultiVector:
         Examples:
 
             >>> from multivectors import x, y, z, w
+            >>> str(x)
+            '1.00x'
             >>> str(x + y)
             '(1.00x + 1.00y)'
             >>> str(y*z - x*w)
