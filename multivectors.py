@@ -450,13 +450,7 @@ class MultiVector:
             >>> print(1 + x + x*y)
             (1.00 + 1.00x + 1.00xy)
         """
-        if self.grade is not None:
-            ((bases, scalar),) = self.termdict.items()
-            if bases == ():
-                return f'{scalar:.2f}'
-            names = idxs_to_names(bases)
-            return f'{scalar:.2f}{names!s}'
-        return '(' + ' + '.join(map(str, self.terms)) + ')'
+        return f'{self:.2f}'
 
     def __format__(self, spec: str) -> str:
         """Return a representation of this multivector suited for formatting.
