@@ -458,6 +458,32 @@ class MultiVector:
             return f'{scalar:.2f}{names!s}'
         return '(' + ' + '.join(map(str, self.terms)) + ')'
 
+    def __format__(self, spec: str) -> str:
+        """Return a representation of this multivector suited for formatting.
+
+        Args:
+            spec: The format spec (forwarded to the underlying :class:`float`s)
+
+        Examples:
+
+            >>> from multivectors import x, y, z, w
+            >>> f'{x:.3f}'
+            '1.000x'
+            >>> V = x + 2 * y + z
+            >>> '{:.3f}'.format(V)
+            '(1.000x + 2.000y + 1.000z)'
+            >>> V = y*z - x*w
+            >>> f'{V:.1f}'
+            '(-1.0xw + 1.0yz)'
+        """
+        if self.grade is not None:
+            ((bases, scalar),) = self.termdict.items()
+            if bases == ():
+                return format(scalar, spec)
+            names = idxs_to_names(bases)
+            return format(scalar, spec) + str(names)
+        return '(' + ' + '.join(format(term, spec) for term in self.terms) + ')'
+
     # Relational operators
 
     def __eq__(self, other: SOV) -> bool:
