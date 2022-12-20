@@ -39,16 +39,6 @@ Blades
         >>> (x * y) * z == x * (y * z)
         True
 
-* You can query the grade of a blade (only if it is an actual blade!):
-
-    .. code-block:: python
-
-        >>> from multivectors import xy, yzw
-        >>> xy.grade
-        2
-        >>> (2 * yzw).grade
-        3
-
 MultiVector
 -----------
 
