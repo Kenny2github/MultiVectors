@@ -1,5 +1,5 @@
 """
-Compute blades and multivectors in arbitrary-dimensional space.
+Compute multivectors in arbitrary-dimensional space.
 
 Installation
 ------------
@@ -245,7 +245,7 @@ def condense_bases(bases: Tuple[int, ...], scalar: float = 1.0) \
     return tuple(_bases), scalar
 
 class MultiVector:
-    """The sum of one or more blades.
+    """A linear combination of geometric products of basis vectors.
 
     The bare constructor is not meant for regular use.
     Use module swizzling or the factory
@@ -1223,7 +1223,7 @@ _blades: Dict[str, MultiVector] = {}
 def __getattr__(name: str) -> MultiVector:
     """Support module level swizzling of basis vectors.
 
-    Unlike :meth:`Blade.__getattr__`,
+    Unlike :meth:`MultiVector.__getattr__`,
     this rejects invalid characters in the name.
     """
     return _blades.setdefault(name, MultiVector(
