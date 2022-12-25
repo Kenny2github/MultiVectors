@@ -271,6 +271,8 @@ class MultiVector:
         0.0
     """
 
+    __slots__ = ('termdict',)
+
     termdict: TermDict
 
     @property
